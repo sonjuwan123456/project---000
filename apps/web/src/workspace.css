@@ -1,0 +1,310 @@
+/*
+ * 작업 공간의 배치와 유리 카드. 색은 전부 --holo-* 변수를 쓴다.
+ * 값의 출처는 packages/core의 palette.ts 하나뿐이다.
+ */
+
+.holo-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+}
+
+.holo-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+}
+
+.holo-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.holo-caption {
+  margin: 0;
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.holo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.holo-chip {
+  border: 1px solid var(--holo-line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 4px 12px;
+  color: var(--holo-dim);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.holo-chip:hover:not(:disabled) {
+  color: var(--holo-text);
+  border-color: var(--holo-dim);
+}
+
+.holo-chip.is-on {
+  color: var(--holo-accent);
+  border-color: var(--holo-accent);
+}
+
+.holo-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.holo-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+  min-height: 0;
+}
+
+.holo-side,
+.holo-bottom,
+.holo-stage-slot {
+  border: 1px solid var(--holo-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--holo-surface) 72%, transparent);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.holo-stage-slot {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.holo-side {
+  padding: 14px;
+  overflow-y: auto;
+}
+
+/* 3D 무대 */
+
+.holo-stage {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+
+.holo-lasso {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.holo-lasso-path {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.holo-lasso-path polygon {
+  fill: color-mix(in srgb, var(--holo-accent) 12%, transparent);
+  stroke: var(--holo-accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.holo-readout {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--holo-line);
+  color: var(--holo-text);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.holo-tag {
+  margin-right: 8px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+/* 분포 그래프 */
+
+.holo-charts {
+  display: grid;
+  gap: 20px;
+}
+
+.holo-chart h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--holo-dim);
+}
+
+.holo-bars {
+  display: grid;
+  gap: 4px;
+}
+
+.holo-bar {
+  display: grid;
+  grid-template-columns: 3.5em minmax(0, 1fr) 4em;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 3px 0;
+  color: var(--holo-text);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.holo-bar.is-off {
+  opacity: 0.3;
+}
+
+.holo-bar-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--holo-line);
+  overflow: hidden;
+}
+
+.holo-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 160ms ease-out;
+}
+
+.holo-bar-count {
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.holo-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 96px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.holo-hist-bar {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: var(--holo-accent);
+  transition: height 160ms ease-out;
+}
+
+.holo-hist-bar.is-off {
+  background: var(--holo-line);
+}
+
+.holo-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.68rem;
+}
+
+/* 표 */
+
+.holo-table {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.holo-table-head,
+.holo-table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.5em 3.5em 3.5em 4em;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+.holo-table-head {
+  height: 34px;
+  border-bottom: 1px solid var(--holo-line);
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.68rem;
+}
+
+.holo-table-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.holo-table-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--holo-line) 45%, transparent);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.holo-table-row.is-hovered {
+  background: color-mix(in srgb, var(--holo-accent) 8%, transparent);
+}
+
+.holo-table-row.is-picked {
+  background: color-mix(in srgb, var(--holo-accent) 16%, transparent);
+}
+
+.holo-cell-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.holo-cell-tag,
+.holo-cell-num {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+.holo-cell-num {
+  color: var(--holo-dim);
+  text-align: right;
+}
+
+/* 좁은 화면에서는 옆 패널을 아래로 내린다. */
+@media (max-width: 900px) {
+  .holo-workspace {
+    grid-template-rows: auto minmax(320px, 1fr) auto minmax(240px, 0.8fr);
+    padding: 16px;
+  }
+
+  .holo-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-bar-fill,
+  .holo-hist-bar {
+    transition: none;
+  }
+}

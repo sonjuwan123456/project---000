@@ -122,6 +122,25 @@ importers:
       '@holo/holo-fx':
         specifier: workspace:*
         version: link:../holo-fx
+      '@react-three/drei':
+        specifier: ^10.7.8
+        version: 10.7.8(@react-three/fiber@9.7.0(@types/react@19.3.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.186.0))(@types/react@19.3.0)(@types/three@0.186.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.186.0)
+      '@react-three/fiber':
+        specifier: ^9.7.0
+        version: 9.7.0(@types/react@19.3.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.186.0)
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      three:
+        specifier: ^0.186.0
+        version: 0.186.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.3.0
+      '@types/three':
+        specifier: ^0.186.0
+        version: 0.186.0
 
 packages:
 
