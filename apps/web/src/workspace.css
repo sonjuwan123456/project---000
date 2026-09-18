@@ -308,3 +308,134 @@
     transition: none;
   }
 }
+
+/* 활동 기록 */
+
+.holo-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.holo-log li {
+  display: grid;
+  grid-template-columns: 4.6em minmax(0, 1fr);
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--holo-dim);
+}
+
+.holo-log time {
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.68rem;
+}
+
+.holo-log li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.holo-log li:first-child {
+  color: var(--holo-text);
+}
+
+/* 명령 팔레트 */
+
+.holo-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  background: color-mix(in srgb, var(--holo-bg) 72%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.holo-palette {
+  width: min(520px, calc(100vw - 32px));
+  align-self: flex-start;
+  border: 1px solid var(--holo-line);
+  border-radius: 14px;
+  background: var(--holo-surface);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 55%);
+  overflow: hidden;
+}
+
+.holo-palette input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--holo-line);
+  background: transparent;
+  padding: 14px 16px;
+  color: var(--holo-text);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+.holo-palette input::placeholder {
+  color: var(--holo-faint);
+}
+
+.holo-palette input:focus {
+  outline: none;
+}
+
+.holo-palette ul {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 44vh;
+  overflow-y: auto;
+}
+
+.holo-palette li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.holo-palette li.is-selected {
+  background: color-mix(in srgb, var(--holo-accent) 14%, transparent);
+  color: var(--holo-accent);
+}
+
+.holo-palette li.is-disabled {
+  color: var(--holo-faint);
+  cursor: default;
+}
+
+.holo-palette li.is-disabled.is-selected {
+  background: color-mix(in srgb, var(--holo-line) 55%, transparent);
+  color: var(--holo-faint);
+}
+
+.holo-palette-empty {
+  color: var(--holo-faint);
+  cursor: default;
+}
+
+.holo-palette-group {
+  margin-left: auto;
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.66rem;
+}
+
+.holo-palette-foot {
+  display: flex;
+  gap: 12px;
+  border-top: 1px solid var(--holo-line);
+  padding: 8px 14px;
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.66rem;
+}

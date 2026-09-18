@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RowMask } from '@holo/core'
 import { SAMPLE_CATEGORIES, type SampleTable } from '@holo/data'
 
 /**
@@ -19,8 +18,10 @@ export type TableViewProps = {
   visibleCount: number
   hovered: number | null
   onHover: (row: number | null) => void
-  /** 행을 누르면 그 행 하나만 남긴다. 같은 행을 다시 누르면 푼다. */
-  onPick: (rows: RowMask | null, count: number) => void
+  /** 지금 이 표가 골라 둔 행. 선택은 작업 공간이 들고 있다. */
+  picked: number | null
+  /** 행을 누르면 알린다. 같은 행을 다시 누르는 것은 해제로 해석하는 쪽이 정한다. */
+  onPick: (row: number) => void
 }
 
 const ROW_HEIGHT = 34
@@ -36,11 +37,10 @@ function sentimentLabel(value: number): string {
 }
 
 export function TableView(props: TableViewProps) {
-  const { table, rows, visibleCount, hovered, onHover, onPick } = props
+  const { table, rows, visibleCount, hovered, onHover, picked, onPick } = props
   const scroller = useRef<HTMLDivElement>(null)
   const [first, setFirst] = useState(0)
   const [window_, setWindow] = useState(24)
-  const [picked, setPicked] = useState<number | null>(null)
 
   // 조건이 바뀌면 보이는 행 자체가 달라진다. 스크롤 위치를 그대로 두면 엉뚱한 곳을 보게 된다.
   useEffect(() => {
@@ -63,18 +63,6 @@ export function TableView(props: TableViewProps) {
   const slice: number[] = []
   for (let index = start; index < end; index += 1) {
     slice.push(rows === null ? index : (rows[index] ?? 0))
-  }
-
-  function handlePick(row: number) {
-    if (picked === row) {
-      setPicked(null)
-      onPick(null, 0)
-      return
-    }
-    const mask = new Uint8Array(table.rowCount)
-    mask[row] = 1
-    setPicked(row)
-    onPick(mask, 1)
   }
 
   return (
@@ -104,7 +92,7 @@ export function TableView(props: TableViewProps) {
                 }
                 style={{ height: ROW_HEIGHT }}
                 onPointerEnter={() => onHover(row)}
-                onClick={() => handlePick(row)}
+                onClick={() => onPick(row)}
               >
                 <span className="holo-cell-text">{table.textOf(row)}</span>
                 <span
