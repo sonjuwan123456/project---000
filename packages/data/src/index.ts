@@ -5,3 +5,5 @@
  * 실제 구현은 M1(로더)과 M2(파생 계산) 에서 채운다.
  */
 export const PACKAGE_NAME = '@holo/data'
+
+export { SAMPLE_CATEGORIES, createSampleTable, type SampleTable } from './sampleTable'
