@@ -1,0 +1,15 @@
+{
+  "name": "@holo/views",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holo/core": "workspace:*",
+    "@holo/data": "workspace:*",
+    "@holo/holo-fx": "workspace:*"
+  }
+}

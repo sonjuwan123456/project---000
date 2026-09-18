@@ -1,0 +1,33 @@
+{
+  "name": "@holo/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@holo/core": "workspace:*",
+    "@holo/data": "workspace:*",
+    "@holo/holo-fx": "workspace:*",
+    "@holo/input": "workspace:*",
+    "@holo/views": "workspace:*",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "@react-three/postprocessing": "^3.1.1",
+    "@react-three/uikit": "^1.0.76",
+    "postprocessing": "^6.39.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

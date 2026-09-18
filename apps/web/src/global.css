@@ -1,0 +1,27 @@
+:root {
+  /*
+   * 색상 변수는 packages/core의 palette.ts에서 main.tsx가 넣는다.
+   * 여기 적힌 값은 변수가 붙기 전 첫 프레임용 대비값이다.
+   */
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--holo-bg, #060507);
+  color: var(--holo-text, #ece9f4);
+  font-family: 'Iowan Old Style', 'Apple SD Gothic Neo', serif;
+
+  /* 한글은 이 값이 없으면 단어 중간에서 끊긴다. 프로토타입에서 얻은 교훈. */
+  word-break: keep-all;
+}
