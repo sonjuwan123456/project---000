@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@holo/core": ["./packages/core/src/index.ts"],
+      "@holo/data": ["./packages/data/src/index.ts"],
+      "@holo/views": ["./packages/views/src/index.ts"],
+      "@holo/holo-fx": ["./packages/holo-fx/src/index.ts"],
+      "@holo/input": ["./packages/input/src/index.ts"]
+    }
+  },
+  "include": ["apps/*/src", "packages/*/src", "apps/*/*.config.ts", "*.config.ts"]
+}
