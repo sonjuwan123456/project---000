@@ -5,3 +5,13 @@
  * 실제 구현은 M2 에서 채운다.
  */
 export const PACKAGE_NAME = '@holo/holo-fx'
+
+export {
+  POINT_ATTRIBUTES,
+  glowPass,
+  maxPixelRatio,
+  pointsFragmentShader,
+  pointsVertexShader,
+  type EffectLevel,
+  type PointsUniforms,
+} from './pointsShader'
