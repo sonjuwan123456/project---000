@@ -3,7 +3,7 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { Bloom, EffectComposer } from '@react-three/postprocessing'
 import { useRef } from 'react'
 import type { Mesh } from 'three'
-import { damp } from '@holo/core'
+import { damp, holoColors } from '@holo/core'
 
 /**
  * 자산이 하나도 없을 때 공간 감각만 보여주는 표식.
@@ -27,7 +27,7 @@ function Placeholder() {
       onPointerOut={() => (hovered.current = false)}
     >
       <icosahedronGeometry args={[1, 1]} />
-      <meshBasicMaterial color="#6ee7ff" wireframe />
+      <meshBasicMaterial color={holoColors.accent} wireframe />
     </mesh>
   )
 }
@@ -35,15 +35,15 @@ function Placeholder() {
 export function EmptyWorkspace() {
   return (
     <Canvas camera={{ position: [3.5, 2.5, 4.5], fov: 45 }}>
-      <color attach="background" args={['#060507']} />
-      <fog attach="fog" args={['#060507', 8, 22]} />
+      <color attach="background" args={[holoColors.bg]} />
+      <fog attach="fog" args={[holoColors.bg, 8, 22]} />
 
       <Placeholder />
 
       <Grid
         args={[40, 40]}
-        cellColor="#241f2e"
-        sectionColor="#3b3350"
+        cellColor={holoColors.line}
+        sectionColor={holoColors.faint}
         fadeDistance={24}
         position={[0, -1.4, 0]}
         infiniteGrid

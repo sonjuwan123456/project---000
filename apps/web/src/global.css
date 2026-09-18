@@ -1,9 +1,8 @@
 :root {
-  /* 색상 토큰은 M0 이후 TypeScript 하나에서 CSS 변수와 셰이더 팔레트를 함께 만든다. */
-  --holo-bg: #060507;
-  --holo-text: #e8e4ee;
-  --holo-dim: #8a8398;
-
+  /*
+   * 색상 변수는 packages/core의 palette.ts에서 main.tsx가 넣는다.
+   * 여기 적힌 값은 변수가 붙기 전 첫 프레임용 대비값이다.
+   */
   color-scheme: dark;
 }
 
@@ -19,8 +18,8 @@ body,
 }
 
 body {
-  background: var(--holo-bg);
-  color: var(--holo-text);
+  background: var(--holo-bg, #060507);
+  color: var(--holo-text, #ece9f4);
   font-family: 'Iowan Old Style', 'Apple SD Gothic Neo', serif;
 
   /* 한글은 이 값이 없으면 단어 중간에서 끊긴다. 프로토타입에서 얻은 교훈. */
