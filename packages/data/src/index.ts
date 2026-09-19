@@ -19,6 +19,9 @@ export type { StringVectorFinding, StringVectorFlavor } from './stringVectorGuar
 export { groupWideVectorColumns, vectorFromLists, vectorFromWideColumns } from './vectorColumn'
 export type { VectorColumn, WideVectorGroup } from './vectorColumn'
 
+export { assetIdOfFile, assetIdOfShape, fingerprint } from './assetId'
+export type { FileIdentity } from './assetId'
+
 export {
   UnsupportedFileError,
   loadJson,

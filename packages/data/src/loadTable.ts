@@ -9,6 +9,7 @@
  */
 
 import type { ColumnLookup } from '@holo/core'
+import { assetIdOfShape } from './assetId'
 import {
   DEFAULT_INFERENCE,
   isBlank,
@@ -73,6 +74,11 @@ export type LoadNotice = {
 }
 
 export type LoadedTable = {
+  /**
+   * 이 표를 알아보는 id. 작업 공간이 저장해 둔 행 번호를 다시 얹어도 되는지
+   * 판단하는 데 쓴다. 같은 파일을 다시 열면 같은 값이고, 고친 파일은 다른 값이다.
+   */
+  readonly assetId: string
   readonly rowCount: number
   /** 화면에 보일 컬럼. 벡터로 묶인 원본 컬럼은 여기 없다. */
   readonly columns: readonly LoadedColumn[]
@@ -239,6 +245,8 @@ export type BuildOptions = {
    * 여기로 들어온 벡터는 넓은 형태 묶기를 거치지 않는다.
    */
   readonly nativeVectors?: readonly VectorColumn[]
+  /** 파일에서 뽑은 자산 id. 주지 않으면 표의 모양으로 만든다. */
+  readonly assetId?: string
 }
 
 /**
@@ -321,7 +329,23 @@ export function buildTable(
     })
   }
 
-  return { rowCount, columns, vectors, hiddenColumns, notices, lookup: lookupFor(columns, vectors) }
+  const assetId =
+    options.assetId ??
+    assetIdOfShape(
+      rowCount,
+      columns.map((column) => [column.name, column.kind] as const),
+      vectors.map((vector) => [vector.name, vector.dimension] as const),
+    )
+
+  return {
+    assetId,
+    rowCount,
+    columns,
+    vectors,
+    hiddenColumns,
+    notices,
+    lookup: lookupFor(columns, vectors),
+  }
 }
 
 export type LoadDelimitedOptions = BuildOptions & {

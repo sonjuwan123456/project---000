@@ -6,6 +6,7 @@
  * "해석 오류를 이해할 수 있는 메시지로" 원칙이 여기에도 걸린다.
  */
 
+import { assetIdOfFile, type FileIdentity } from './assetId'
 import { buildTable, type BuildOptions, type LoadNotice, type LoadedTable } from './loadTable'
 import { loadDelimitedText } from './loadTable'
 import { vectorFromLists, type VectorColumn } from './vectorColumn'
@@ -147,8 +148,7 @@ const PLANNED: Readonly<Record<string, string>> = {
 }
 
 /** 브라우저의 File을 그대로 받는다. 텍스트를 읽는 일만 밖에서 시킨다. */
-export type ReadableFile = {
-  readonly name: string
+export type ReadableFile = FileIdentity & {
   text(): Promise<string>
 }
 
@@ -160,9 +160,12 @@ export async function readTableFile(
   const planned = PLANNED[extension]
   if (planned !== undefined) throw new UnsupportedFileError(file.name, planned)
 
+  // 파일에서 뽑은 id를 아래로 내려 보낸다. 같은 파일을 다시 열면 같은 값이 나온다.
+  const withId: BuildOptions = { ...options, assetId: assetIdOfFile(file) }
+
   if (extension === 'json') {
     try {
-      return loadJson(await file.text(), options)
+      return loadJson(await file.text(), withId)
     } catch (error) {
       throw new UnsupportedFileError(
         file.name,
@@ -172,7 +175,7 @@ export async function readTableFile(
   }
   if (extension === 'jsonl' || extension === 'ndjson') {
     try {
-      return loadJsonLines(await file.text(), options)
+      return loadJsonLines(await file.text(), withId)
     } catch (error) {
       throw new UnsupportedFileError(
         file.name,
@@ -181,7 +184,7 @@ export async function readTableFile(
     }
   }
   if (extension === 'csv' || extension === 'tsv' || extension === 'txt' || extension === '') {
-    const table = loadDelimitedText(await file.text(), options)
+    const table = loadDelimitedText(await file.text(), withId)
     if (table.columns.length === 0 && table.vectors.length === 0) {
       throw new UnsupportedFileError(
         file.name,
