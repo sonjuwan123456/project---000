@@ -439,3 +439,7 @@
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 0.66rem;
 }
+
+.holo-notice {
+  color: var(--holo-cat-4);
+}
