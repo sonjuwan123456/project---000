@@ -25,7 +25,14 @@ export type HoloColorName = keyof typeof holoColors
 
 /**
  * 범주 컬럼을 색으로 나눌 때 쓰는 순서 있는 팔레트.
- * 어두운 배경에서 서로 구분되는 순서로 골랐고, 마지막은 "기타"용 무채색이다.
+ *
+ * 요구사항 2.2가 3D 점 색상을 "상위 12개 + 기타"로 정해서 유채색 12개와
+ * 마지막 무채색 하나를 둔다. 색상환을 도는 순서가 아니라 **앞에서부터 잘라 써도
+ * 구분되는 순서**로 놓았다. 범주가 셋뿐인 표가 훨씬 흔하고, 그때 앞 세 개가
+ * 비슷한 색이면 화면이 못 쓰게 된다.
+ *
+ * 12개는 사람이 색만으로 구별할 수 있는 한계에 가깝다. 뒤쪽 색끼리는 헷갈릴 수
+ * 있으므로 색 하나만으로 뜻을 전하지 말고 범례와 이름을 함께 둘 것.
  */
 export const categoryColors = [
   '#5bd1e8',
@@ -33,8 +40,21 @@ export const categoryColors = [
   '#ff7d9c',
   '#5fe3a1',
   '#f2a65a',
+  '#6fb0ff',
+  '#e8d15c',
+  '#ff8f6b',
+  '#a8e05f',
+  '#e07fd8',
+  '#4fd0c0',
+  '#c2b280',
   '#c9cedc',
 ] as const
+
+/** 색을 받는 범주의 최대 개수. 이 수를 넘는 값은 전부 "기타"로 모은다. */
+export const MAX_COLORED_CATEGORIES = categoryColors.length - 1
+
+/** "기타"가 쓰는 자리. 팔레트의 마지막이다. */
+export const OVERFLOW_CATEGORY = MAX_COLORED_CATEGORIES
 
 /** `#rrggbb`를 셰이더가 쓰는 0~1 세 값으로 바꾼다. */
 export function hexToRgb01(hex: string): readonly [number, number, number] {

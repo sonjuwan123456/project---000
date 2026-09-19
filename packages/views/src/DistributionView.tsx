@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { SAMPLE_CATEGORIES, type SampleTable } from '@holo/data'
+import type { CategoryRole, MeasureRole } from '@holo/data'
 
 /**
  * 분포 그래프 — 표와 같은 "필터" 반응 뷰.
@@ -12,31 +12,33 @@ import { SAMPLE_CATEGORIES, type SampleTable } from '@holo/data'
  * 막대 높이는 보이는 행만 세서 정한다. 만 행을 세는 것은 한 프레임 안에 끝난다.
  */
 export type DistributionViewProps = {
-  table: SampleTable
+  rowCount: number
+  /** 막대에 쓸 범주 컬럼. 없으면 막대를 그리지 않는다. */
+  category: CategoryRole | null
+  /** 히스토그램에 쓸 숫자 컬럼. 없으면 그리지 않는다. */
+  measure: MeasureRole | null
   /** 범주 조건을 뺀 선택. 막대 높이는 이것으로 센다. null이면 전체. */
   visibleForCategories: Uint8Array | null
-  /** 감성 조건을 뺀 선택. 히스토그램 높이는 이것으로 센다. null이면 전체. */
-  visibleForSentiment: Uint8Array | null
-  /** 지금 고른 범주 값들. 빈 배열이면 조건 없음. */
+  /** 숫자 조건을 뺀 선택. 히스토그램 높이는 이것으로 센다. null이면 전체. */
+  visibleForMeasure: Uint8Array | null
+  /** 지금 고른 범주 자리들. 빈 배열이면 조건 없음. */
   categories: readonly number[]
-  /** 지금 고른 감성 구간. null이면 조건 없음. */
+  /** 지금 고른 숫자 구간. null이면 조건 없음. */
   range: { min: number; max: number } | null
   onCategories: (values: readonly number[]) => void
   onRange: (range: { min: number; max: number } | null) => void
 }
 
 const BINS = 28
-const SENTIMENT_MIN = -1
-const SENTIMENT_MAX = 1
 
 function countBy(
-  table: SampleTable,
+  rowCount: number,
   visible: Uint8Array | null,
   bucketOf: (row: number) => number,
   buckets: number,
 ): Uint32Array {
   const counts = new Uint32Array(buckets)
-  for (let row = 0; row < table.rowCount; row += 1) {
+  for (let row = 0; row < rowCount; row += 1) {
     if (visible !== null && visible[row] !== 1) continue
     const bucket = bucketOf(row)
     if (bucket >= 0 && bucket < buckets) counts[bucket] = (counts[bucket] ?? 0) + 1
@@ -50,32 +52,51 @@ function maxOf(counts: Uint32Array): number {
   return max
 }
 
-function binOf(value: number): number {
-  const ratio = (value - SENTIMENT_MIN) / (SENTIMENT_MAX - SENTIMENT_MIN)
+function binOf(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return -1
+  const width = max - min
+  const ratio = width === 0 ? 0 : (value - min) / width
   return Math.min(BINS - 1, Math.max(0, Math.floor(ratio * BINS)))
 }
 
+/** 눈금 글자. 값의 크기에 따라 자릿수를 줄인다. */
+function tick(value: number): string {
+  if (!Number.isFinite(value)) return ''
+  if (Number.isInteger(value)) return value.toLocaleString('ko-KR')
+  return value.toLocaleString('ko-KR', { maximumFractionDigits: Math.abs(value) < 10 ? 2 : 0 })
+}
+
 export function DistributionView(props: DistributionViewProps) {
-  const { table, visibleForCategories, visibleForSentiment, categories, range } = props
-  const { onCategories, onRange } = props
+  const { rowCount, category, measure, visibleForCategories, visibleForMeasure } = props
+  const { categories, range, onCategories, onRange } = props
 
   const categoryCounts = useMemo(
     () =>
-      countBy(
-        table,
-        visibleForCategories,
-        (row) => table.category[row] ?? 0,
-        SAMPLE_CATEGORIES.length,
-      ),
-    [table, visibleForCategories],
+      category === null
+        ? new Uint32Array(0)
+        : countBy(
+            rowCount,
+            visibleForCategories,
+            (row) => category.slotOf(row),
+            category.names.length,
+          ),
+    [rowCount, category, visibleForCategories],
   )
-  const sentimentCounts = useMemo(
-    () => countBy(table, visibleForSentiment, (row) => binOf(table.sentiment[row] ?? 0), BINS),
-    [table, visibleForSentiment],
+  const measureCounts = useMemo(
+    () =>
+      measure === null
+        ? new Uint32Array(0)
+        : countBy(
+            rowCount,
+            visibleForMeasure,
+            (row) => binOf(measure.values[row] ?? Number.NaN, measure.min, measure.max),
+            BINS,
+          ),
+    [rowCount, measure, visibleForMeasure],
   )
 
   const categoryMax = maxOf(categoryCounts)
-  const sentimentMax = maxOf(sentimentCounts)
+  const measureMax = maxOf(measureCounts)
 
   const brush = useRef<{ from: number } | null>(null)
   const [dragging, setDragging] = useState<{ min: number; max: number } | null>(null)
@@ -84,8 +105,9 @@ export function DistributionView(props: DistributionViewProps) {
     const box = event.currentTarget.getBoundingClientRect()
     return Math.min(1, Math.max(0, (event.clientX - box.left) / box.width))
   }
-  function toSentiment(ratio: number): number {
-    return SENTIMENT_MIN + ratio * (SENTIMENT_MAX - SENTIMENT_MIN)
+  function toValue(ratio: number): number {
+    if (measure === null) return 0
+    return measure.min + ratio * (measure.max - measure.min)
   }
 
   function toggleCategory(value: number) {
@@ -99,89 +121,96 @@ export function DistributionView(props: DistributionViewProps) {
 
   return (
     <div className="holo-charts">
-      <section className="holo-chart">
-        <h3>범주</h3>
-        <div className="holo-bars">
-          {SAMPLE_CATEGORIES.map((name, index) => {
-            const count = categoryCounts[index] ?? 0
-            const on = categories.length === 0 || categories.includes(index)
-            return (
-              <button
-                type="button"
-                key={name}
-                className={'holo-bar' + (on ? '' : ' is-off')}
-                onClick={() => toggleCategory(index)}
-                aria-pressed={categories.includes(index)}
-              >
-                <span className="holo-bar-name">{name}</span>
-                <span className="holo-bar-track">
-                  <span
-                    className="holo-bar-fill"
-                    style={{
-                      width: `${(count / categoryMax) * 100}%`,
-                      background: `var(--holo-cat-${index})`,
-                    }}
-                  />
-                </span>
-                <span className="holo-bar-count">{count.toLocaleString('ko-KR')}</span>
-              </button>
-            )
-          })}
-        </div>
-      </section>
+      {category === null ? null : (
+        <section className="holo-chart">
+          <h3>{category.column}</h3>
+          <div className="holo-bars">
+            {category.names.map((name, index) => {
+              const count = categoryCounts[index] ?? 0
+              const on = categories.length === 0 || categories.includes(index)
+              return (
+                <button
+                  type="button"
+                  key={name}
+                  className={'holo-bar' + (on ? '' : ' is-off')}
+                  onClick={() => toggleCategory(index)}
+                  aria-pressed={categories.includes(index)}
+                >
+                  <span className="holo-bar-name">{name}</span>
+                  <span className="holo-bar-track">
+                    <span
+                      className="holo-bar-fill"
+                      style={{
+                        width: `${(count / categoryMax) * 100}%`,
+                        background: `var(--holo-cat-${category.colorOfSlot(index)})`,
+                      }}
+                    />
+                  </span>
+                  <span className="holo-bar-count">{count.toLocaleString('ko-KR')}</span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
-      <section className="holo-chart">
-        <h3>
-          감성
-          {range === null ? null : (
-            <button type="button" className="holo-chip" onClick={() => onRange(null)}>
-              구간 해제
-            </button>
-          )}
-        </h3>
-        <div
-          className="holo-histogram"
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId)
-            const at = toSentiment(ratioAt(event))
-            brush.current = { from: at }
-            setDragging({ min: at, max: at })
-          }}
-          onPointerMove={(event) => {
-            const from = brush.current
-            if (!from) return
-            const at = toSentiment(ratioAt(event))
-            setDragging({ min: Math.min(from.from, at), max: Math.max(from.from, at) })
-          }}
-          onPointerUp={() => {
-            const picked = dragging
-            brush.current = null
-            setDragging(null)
-            // 끌지 않고 누르기만 한 것은 구간 해제로 본다.
-            if (!picked || picked.max - picked.min < 0.04) onRange(null)
-            else onRange(picked)
-          }}
-        >
-          {Array.from({ length: BINS }, (_, index) => {
-            const count = sentimentCounts[index] ?? 0
-            const left = SENTIMENT_MIN + (index / BINS) * (SENTIMENT_MAX - SENTIMENT_MIN)
-            const right = SENTIMENT_MIN + ((index + 1) / BINS) * (SENTIMENT_MAX - SENTIMENT_MIN)
-            const inRange = shown === null || (right > shown.min && left < shown.max)
-            return (
-              <span
-                key={index}
-                className={'holo-hist-bar' + (inRange ? '' : ' is-off')}
-                style={{ height: `${Math.max(2, (count / sentimentMax) * 100)}%` }}
-              />
-            )
-          })}
-        </div>
-        <div className="holo-axis">
-          <span>부정</span>
-          <span>중립</span>
-          <span>긍정</span>
-        </div>
-      </section>
+      {measure === null ? null : (
+        <section className="holo-chart">
+          <h3>
+            {measure.column}
+            {range === null ? null : (
+              <button type="button" className="holo-chip" onClick={() => onRange(null)}>
+                구간 해제
+              </button>
+            )}
+          </h3>
+          <div
+            className="holo-histogram"
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId)
+              const at = toValue(ratioAt(event))
+              brush.current = { from: at }
+              setDragging({ min: at, max: at })
+            }}
+            onPointerMove={(event) => {
+              const from = brush.current
+              if (!from) return
+              const at = toValue(ratioAt(event))
+              setDragging({ min: Math.min(from.from, at), max: Math.max(from.from, at) })
+            }}
+            onPointerUp={() => {
+              const picked = dragging
+              brush.current = null
+              setDragging(null)
+              // 끌지 않고 누르기만 한 것은 구간 해제로 본다.
+              // 끌지 않고 누르기만 한 것은 구간 해제로 본다. 폭은 값의 범위에 견준다.
+              const tiny = (measure.max - measure.min) * 0.02
+              if (!picked || picked.max - picked.min <= tiny) onRange(null)
+              else onRange(picked)
+            }}
+          >
+            {Array.from({ length: BINS }, (_, index) => {
+              const count = measureCounts[index] ?? 0
+              const width = measure.max - measure.min
+              const left = measure.min + (index / BINS) * width
+              const right = measure.min + ((index + 1) / BINS) * width
+              const inRange = shown === null || (right > shown.min && left < shown.max)
+              return (
+                <span
+                  key={index}
+                  className={'holo-hist-bar' + (inRange ? '' : ' is-off')}
+                  style={{ height: `${Math.max(2, (count / measureMax) * 100)}%` }}
+                />
+              )
+            })}
+          </div>
+          <div className="holo-axis">
+            <span>{tick(measure.min)}</span>
+            <span>{tick((measure.min + measure.max) / 2)}</span>
+            <span>{tick(measure.max)}</span>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
