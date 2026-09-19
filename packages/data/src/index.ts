@@ -1,7 +1,8 @@
 /**
  * 연결층·데이터층. 로더 레지스트리, Arrow 데이터층, 계산 워커.
  *
- * M1에서 표 데이터 자산을 불러오는 길이 들어왔다. 파생 계산(M2)은 아직이다.
+ * M1에서 표 데이터 자산을 불러오는 길이 들어왔고, M2에서 임베딩을 주성분 셋으로
+ * 줄이는 계산이 워커로 들어갔다.
  */
 export const PACKAGE_NAME = '@holo/data'
 
@@ -31,7 +32,22 @@ export {
 } from './readTableFile'
 export type { ReadableFile } from './readTableFile'
 
-export { toViewModel } from './viewModel'
+export { DEFAULT_PCA, pcaTo3D } from './pca'
+export type { PcaOptions, PcaResult } from './pca'
+
+export { canUseWorker } from './workerSupport'
+
+export { startPca } from './pcaClient'
+export type { PcaJob } from './pcaClient'
+
+export { startTableRead } from './tableClient'
+export type { TableJob } from './tableClient'
+
+export type { TableRequest, TableResponse } from './tableWorker'
+
+export type { PcaRequest, PcaResponse } from './pcaWorker'
+
+export { toViewModel, vectorToReduce } from './viewModel'
 export type {
   CategoryRole,
   CellKind,
@@ -39,9 +55,10 @@ export type {
   Positions,
   ViewColumn,
   ViewModel,
+  ViewModelOptions,
 } from './viewModel'
 
-export { buildTable, loadDelimitedText } from './loadTable'
+export { attachLookup, buildTable, loadDelimitedText } from './loadTable'
 export type {
   BuildOptions,
   LoadDelimitedOptions,
@@ -51,5 +68,6 @@ export type {
   LoadedDatetimeColumn,
   LoadedNumberColumn,
   LoadedTable,
+  LoadedTableData,
   LoadedTextColumn,
 } from './loadTable'

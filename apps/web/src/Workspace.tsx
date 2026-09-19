@@ -19,10 +19,14 @@ import {
 import {
   UnsupportedFileError,
   loadDelimitedText,
-  readTableFile,
   sampleCsv,
+  startPca,
+  startTableRead,
   toViewModel,
+  vectorToReduce,
   type LoadedTable,
+  type PcaResult,
+  type TableJob,
   type ViewModel,
 } from '@holo/data'
 import type { EffectLevel } from '@holo/holo-fx'
@@ -113,15 +117,60 @@ function pickedOf(clauses: SelectionClauses): number | null {
   return row === -1 ? null : row
 }
 
+/** 임베딩을 줄이는 계산이 어디까지 갔는지. 표 이름을 달아 지난 표의 결과를 걸러 낸다. */
+type Reduction =
+  | { kind: 'idle' }
+  | { kind: 'running'; assetId: string }
+  | { kind: 'done'; assetId: string; result: PcaResult }
+  | { kind: 'failed'; assetId: string }
+
 export function Workspace() {
   const [source, setSource] = useState<{ table: LoadedTable; label: string }>(() => ({
     table: sampleLoadedTable(),
     label: '고객문의 샘플',
   }))
-  const model: ViewModel = useMemo(
-    () => toViewModel(source.table, source.label),
-    [source.table, source.label],
-  )
+  /*
+   * 임베딩을 줄이는 계산은 워커로 보낸다. 2만 행 384차원이면 0.5초가 넘어서,
+   * 주 스레드에서 돌리면 파일을 연 순간 화면이 굳는다. 결과가 오기 전까지는
+   * 좌표 없는 뷰 모델을 쓴다 — 표와 분포 그래프는 그동안에도 만질 수 있다.
+   *
+   * 결과에 표 이름을 같이 달아 둔다. 표를 갈아 끼우는 사이에 지난 계산이 돌아와
+   * 다른 표의 좌표를 그리면 안 된다.
+   */
+  const [reduction, setReduction] = useState<Reduction>({ kind: 'idle' })
+
+  useEffect(() => {
+    const vector = vectorToReduce(source.table)
+    const { assetId } = source.table
+    if (vector === null) {
+      setReduction({ kind: 'idle' })
+      return
+    }
+    setReduction({ kind: 'running', assetId })
+    const job = startPca(vector)
+    let alive = true
+    void job.result
+      .then((result) => {
+        if (alive) setReduction({ kind: 'done', assetId, result })
+      })
+      .catch(() => {
+        // 실패하면 좌표 없이 둔다. 뷰 모델이 "만들지 못했다"고 말해 준다.
+        if (alive) setReduction({ kind: 'failed', assetId })
+      })
+    return () => {
+      alive = false
+      job.cancel()
+    }
+  }, [source.table])
+
+  const model: ViewModel = useMemo(() => {
+    const current = reduction.kind !== 'idle' && reduction.assetId === source.table.assetId
+    return toViewModel(source.table, source.label, {
+      reduced: current && reduction.kind === 'done' ? reduction.result : null,
+      // 계산이 도는 중일 때만 기다린다. 실패했으면 이유를 보여 줘야 한다.
+      awaitingReduction: !current || reduction.kind === 'running',
+    })
+  }, [source.table, source.label, reduction])
   const [state, run] = useReducer(reduce, undefined, () =>
     createWorkspaceState('작업 공간 열기 · 고객문의 샘플'),
   )
@@ -289,21 +338,46 @@ export function Workspace() {
     openTable(sampleLoadedTable(), '고객문의 샘플')
   }, [openTable])
 
+  /*
+   * 파일 읽기도 워커에서 돈다. 5만 행짜리 파일이면 읽기·파싱·종류 판별에 수 초가
+   * 걸리고, 본 스레드에서 돌리면 그동안 화면이 통째로 굳는다.
+   *
+   * 읽는 동안에는 이전 표가 그대로 보인다. 화면을 비워 두면 잘못 떨어뜨렸을 때
+   * 돌아갈 자리가 없어진다.
+   */
+  const reading = useRef<TableJob | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const openFile = useCallback(
     async (blob: File) => {
+      reading.current?.cancel()
+      const job = startTableRead(blob)
+      reading.current = job
+      setNotice(null)
+      setBusy(blob.name)
       try {
-        openTable(await readTableFile(blob), blob.name)
+        const table = await job.result
+        if (reading.current !== job) return
+        openTable(table, blob.name)
       } catch (error) {
+        if (reading.current !== job) return
         const message =
           error instanceof UnsupportedFileError
             ? error.message
             : `'${blob.name}'을(를) 읽지 못했다.`
         setNotice(message)
         run({ kind: 'note', label: `파일 열기 실패 · ${blob.name}` })
+      } finally {
+        if (reading.current === job) {
+          reading.current = null
+          setBusy(null)
+        }
       }
     },
     [openTable],
   )
+
+  // 화면을 떠날 때 읽던 것을 멈춘다. 워커가 남아 계속 돌면 안 된다.
+  useEffect(() => () => reading.current?.cancel(), [])
 
   const clearAll = useCallback(() => {
     if (clauses.size === 0) return
@@ -538,7 +612,11 @@ export function Workspace() {
           {model.position === null ? (
             <div className="holo-stage-empty">
               <p>{model.positionMissing}</p>
-              <p className="holo-caption">표와 분포 그래프는 그대로 쓸 수 있습니다.</p>
+              <p className="holo-caption">
+                {model.positionPending
+                  ? '계산은 화면 밖에서 돕니다. 그동안에도 표와 분포 그래프는 만질 수 있습니다.'
+                  : '표와 분포 그래프는 그대로 쓸 수 있습니다.'}
+              </p>
             </div>
           ) : (
             <PointCloudView
@@ -555,11 +633,14 @@ export function Workspace() {
             />
           )}
           <p className="holo-readout">
-            {notice !== null ? (
+            {busy !== null ? (
+              <span className="holo-caption">{busy}을(를) 읽고 있습니다…</span>
+            ) : notice !== null ? (
               <span className="holo-notice">{notice}</span>
             ) : hoveredText === null ? (
               <span className="holo-caption">
-                점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.
+                {model.position?.derivedFrom ??
+                  '점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.'}
               </span>
             ) : (
               <>
