@@ -93,17 +93,50 @@ describe('profileColumn — 범주와 텍스트', () => {
   })
 
   it('고유값이 1000개를 넘어도 비율이 20% 이하면 범주다', () => {
-    // 넓게 잡기로 한 쪽. 상품 코드 2000종이 5만 행에 반복되는 경우.
-    const values = Array.from({ length: 2000 }, (_, row) => `SKU-${row % 1500}`)
-    const profile = profileColumn(values, {
-      sampleSize: 2000,
-      numberRatio: 0.95,
-      datetimeRatio: 0.95,
-      categoryMaxUnique: 1000,
-      categoryMaxUniqueRatio: 0.9,
-      categoryMaxAverageLength: 80,
-    })
+    // 넓게 잡기로 한 쪽. 상품 코드 1500종이 5만 행에 반복되는 경우, 비율은 3%다.
+    // 기본값 그대로 두고 잰다 — 문턱을 느슨하게 바꿔 재면 비율 조건이 실제로
+    // 결정을 내리는지 알 수 없다.
+    const values = Array.from({ length: 50_000 }, (_, row) => `SKU-${row % 1500}`)
+    const profile = profileColumn(values)
+    expect(profile.uniqueCount).toBe(1500)
     expect(profile.kind).toBe('category')
+  })
+
+  it('비율 조건은 표본이 아니라 컬럼 전체에서 잰다', () => {
+    // 표본 2000개로 비율을 재면 "20% 이하"가 "고유값 400개 이하"라는 뜻이 되어
+    // "1000개 이하" 조건에 통째로 삼켜진다. 그러면 비율 조건은 아무것도 결정하지 못한다.
+    // 고유값 1500개는 1000개 조건에는 걸리고 비율 조건으로만 통과한다.
+    const values = Array.from({ length: 50_000 }, (_, row) => `코드-${row % 1500}`)
+    expect(profileColumn(values).kind).toBe('category')
+    // 같은 고유값 개수라도 행이 적어 비율이 높아지면 텍스트다.
+    const few = Array.from({ length: 3000 }, (_, row) => `코드-${row % 1500}`)
+    expect(profileColumn(few).kind).toBe('text')
+  })
+
+  it('앞쪽만 좁으면 범주였던 컬럼이 텍스트로 간다', () => {
+    // 방향이 양쪽으로 열려 있다는 것을 박아 둔다. 앞 2천 행만 보면 고유값 500개라
+    // 범주였지만, 전체로는 4만 8천 종이라 범주가 될 수 없다. 주문번호처럼 앞쪽이
+    // 좁은 구간에 몰린 정렬된 컬럼이 이 모양이다.
+    // 범주 4만 8천 개는 색칠도 분포 그래프도 뜻이 없으므로 텍스트가 맞다.
+    const values = Array.from({ length: 50_000 }, (_, row) =>
+      row < 2000 ? `코드-${row % 500}` : `코드-${row}`,
+    )
+    expect(profileColumn(values).kind).toBe('text')
+  })
+
+  it('앞쪽이 비어 있어도 뒤에 값이 있으면 그 종류로 본다', () => {
+    // 로그에 필드를 중간부터 넣기 시작한 흔한 모양. 앞에서부터 2000행만 보면
+    // 표본이 전부 빈 칸이라 4만 7천 개의 숫자가 통째로 텍스트가 된다.
+    const values = Array.from({ length: 50_000 }, (_, row) => (row < 3000 ? '' : String(row % 97)))
+    expect(profileColumn(values).kind).toBe('number')
+  })
+
+  it('앞쪽만 한 부류인 정렬된 파일도 종류가 흔들리지 않는다', () => {
+    // 날짜로 정렬된 파일에서 앞 2000행이 같은 날 하루에 몰려 있는 경우.
+    const values = Array.from({ length: 50_000 }, (_, row) =>
+      row < 2000 ? '2026-01-01T00:00:00Z' : `2026-0${(row % 9) + 1}-15T12:00:00Z`,
+    )
+    expect(profileColumn(values).kind).toBe('datetime')
   })
 
   it('반복이 많아 고유값 비율이 낮아도 문장이 길면 텍스트다', () => {

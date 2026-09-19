@@ -9,7 +9,7 @@
 export type ScalarColumnKind = 'number' | 'datetime' | 'category' | 'text'
 
 export type InferenceOptions = {
-  /** 앞에서부터 몇 개를 보고 판단할지. 5만 행을 다 보지 않아도 종류는 갈린다. */
+  /** 종류를 가릴 때 파싱해 볼 값의 개수. 앞에서부터가 아니라 컬럼 전체에 고르게 뿌린다. */
   readonly sampleSize: number
   /** 숫자로 확정하는 최소 비율. */
   readonly numberRatio: number
@@ -37,7 +37,11 @@ export type ColumnProfile = {
   readonly blank: number
   /** 확정된 종류로 파싱되지 않은 표본 값의 개수. 텍스트·범주는 항상 0. */
   readonly unparsed: number
-  /** 표본 기준 고유값 개수. 표본 크기가 상한이다. */
+  /**
+   * 고유값 개수. 범주인지 가리는 데까지 간 컬럼은 **모든 행**을 세고,
+   * 그 전에 숫자·날짜시간·긴 텍스트로 갈린 컬럼은 표본에서만 센다.
+   * 셈은 범주가 될 수 없는 것이 확실해지는 수에서 멈추므로 그 위로는 정확하지 않다.
+   */
   readonly uniqueCount: number
   readonly averageLength: number
   /** 컬럼 전체가 빈 칸이면 텍스트로 두고 인코딩 후보에서 뺀다. */
@@ -102,11 +106,56 @@ export function parseDatetime(value: string): number | null {
   return utc + sign * offsetMinutes * 60_000
 }
 
+/**
+ * 종류를 가릴 때 볼 행 번호. 앞에서부터 자르면 안 된다 — 파일은 정렬돼 있을 수 있고,
+ * 로그처럼 중간부터 채워지기 시작한 컬럼은 앞 2천 행이 전부 빈 칸이라 통째로
+ * 텍스트가 돼 버린다. 일정한 간격도 안 된다. 간격이 파일의 주기와 맞으면 한 부류만
+ * 뽑힌다. 황금비 간격은 주기가 없고 씨앗 없이도 언제나 같은 행을 뽑는다.
+ * `pca.ts`의 표본 솎기와 같은 이유로 같은 방식을 쓴다.
+ */
+const GOLDEN = 0.618033988749895
+
+function* sampleRows(length: number, limit: number): Generator<number> {
+  if (length <= limit) {
+    for (let row = 0; row < length; row += 1) yield row
+    return
+  }
+  for (let index = 0; index < limit; index += 1) {
+    yield Math.floor(((index * GOLDEN) % 1) * length)
+  }
+}
+
+/**
+ * 고유값을 **모든 행에서** 센다. 비율 조건이 뜻을 가지려면 컬럼 전체를 봐야 한다.
+ * 표본 2천 개로 비율을 재면 "고유값 ≤ 20%"는 고유값 400개 이하라는 뜻이 되어
+ * "고유값 ≤ 1000" 안에 통째로 들어가 버린다. 즉 비율 조건이 아무것도 결정하지 못한다.
+ *
+ * 범주가 될 수 없는 것이 확실해지면 멈춘다. 그 위로 더 세어 봐야 답이 같고,
+ * 자유 문장 컬럼에서 5만 개짜리 집합을 만들 이유가 없다.
+ */
+function countDistinct(
+  values: readonly (string | null | undefined)[],
+  options: InferenceOptions,
+): { distinct: number; filled: number; exact: boolean } {
+  const ceiling = Math.max(
+    options.categoryMaxUnique,
+    Math.ceil(values.length * options.categoryMaxUniqueRatio),
+  )
+  const seen = new Set<string>()
+  let filled = 0
+  for (const raw of values) {
+    if (isBlank(raw)) continue
+    filled += 1
+    if (seen.size > ceiling) continue
+    seen.add(raw as string)
+  }
+  return { distinct: seen.size, filled, exact: seen.size <= ceiling }
+}
+
 export function profileColumn(
   values: readonly (string | null | undefined)[],
   options: InferenceOptions = DEFAULT_INFERENCE,
 ): ColumnProfile {
-  const limit = Math.min(values.length, options.sampleSize)
   const unique = new Set<string>()
   let sampled = 0
   let blank = 0
@@ -114,7 +163,7 @@ export function profileColumn(
   let datetime = 0
   let lengthSum = 0
 
-  for (let row = 0; row < limit; row += 1) {
+  for (const row of sampleRows(values.length, options.sampleSize)) {
     const raw = values[row]
     if (isBlank(raw)) {
       blank += 1
@@ -146,11 +195,19 @@ export function profileColumn(
   if (datetime / sampled >= options.datetimeRatio) {
     return { ...base, kind: 'datetime', unparsed: sampled - datetime }
   }
-  const withinUnique =
-    unique.size <= options.categoryMaxUnique ||
-    unique.size / sampled <= options.categoryMaxUniqueRatio
-  if (averageLength <= options.categoryMaxAverageLength && withinUnique) {
-    return { ...base, kind: 'category', unparsed: 0 }
+  // 길이는 표본만으로 갈린다. 여기서 텍스트로 빠지면 아래 전체 훑기를 하지 않는다.
+  if (averageLength > options.categoryMaxAverageLength) {
+    return { ...base, kind: 'text', unparsed: 0 }
   }
-  return { ...base, kind: 'text', unparsed: 0 }
+
+  const counted = countDistinct(values, options)
+  const withinUnique =
+    counted.distinct <= options.categoryMaxUnique ||
+    (counted.exact && counted.distinct / counted.filled <= options.categoryMaxUniqueRatio)
+  return {
+    ...base,
+    uniqueCount: counted.distinct,
+    kind: withinUnique ? 'category' : 'text',
+    unparsed: 0,
+  }
 }
