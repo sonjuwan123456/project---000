@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   applyCommand,
   canUndo,
   composeSelection,
   createWorkspaceState,
+  fromWorkspaceFile,
   maskToRowIndices,
+  parseWorkspaceFile,
+  toWorkspaceFile,
   type Command,
   type RowMask,
   type SelectionClause,
   type SelectionClauses,
   type SelectionSource,
+  type StoredCamera,
   type WorkspaceState,
 } from '@holo/core'
 import { SAMPLE_CATEGORIES, createSampleTable } from '@holo/data'
@@ -22,6 +26,7 @@ import {
   TableView,
   type PaletteCommand,
 } from '@holo/views'
+import { clearWorkspace, loadWorkspace, saveWorkspace } from './workspaceStore'
 
 /**
  * 작업 공간 — 세 뷰를 선택 코디네이터 하나로 묶는 곳.
@@ -34,7 +39,8 @@ import {
  * 필요하지 않고, 팔레트는 같은 명령을 이름으로 꺼내 쓴다.
  *
  * 조건만 상태로 들고 있고 행 비트 배열은 매번 다시 만든다. 작업 공간을 저장할 때
- * 남길 것이 조건뿐이기 때문이다.
+ * 남길 것이 조건뿐이기 때문이다. 저장은 조건이 바뀔 때마다 알아서 하고, 새로 고치면
+ * 그 조건으로 다시 계산한 화면이 나온다.
  */
 
 const POINTS: SelectionSource = 'points'
@@ -49,6 +55,16 @@ const EFFECT_LABELS: ReadonlyArray<{ level: EffectLevel; label: string }> = [
 ]
 
 const count = (value: number) => value.toLocaleString('ko-KR')
+
+/** 저장된 문자열을 효과 단계로 되돌린다. 모르는 값은 기본값으로 둔다. */
+function toEffectLevel(value: string): EffectLevel {
+  return EFFECT_LABELS.some(({ level }) => level === value) ? (value as EffectLevel) : 'normal'
+}
+
+function fileStamp(now: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
+}
 
 /** useReducer는 인자 개수가 정확히 둘인 함수만 받는다. applyCommand의 시각 인자를 덮어 둔다. */
 const reduce = (state: WorkspaceState, command: Command): WorkspaceState =>
@@ -91,6 +107,11 @@ export function Workspace() {
   const [lasso, setLasso] = useState(false)
   const [effect, setEffect] = useState<EffectLevel>('normal')
   const [palette, setPalette] = useState(false)
+  const [camera, setCamera] = useState<StoredCamera | null>(null)
+  /** 저장된 작업 공간을 읽어 보기 전에는 아무것도 그리지 않는다. */
+  const [ready, setReady] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const picker = useRef<HTMLInputElement>(null)
 
   const { clauses } = state
   const columns = table.columns
@@ -120,6 +141,100 @@ export function Workspace() {
   const range = rangeOf(clauses)
   const picked = pickedOf(clauses)
   const hasSelection = clauses.size > 0
+
+  // 저장된 작업 공간을 한 번 읽어 본다. 이것이 끝나기 전에 저장하면 빈 상태로 덮어쓴다.
+  useEffect(() => {
+    let alive = true
+    void loadWorkspace().then((file) => {
+      if (!alive) return
+      // 비어 있는 파일을 되살렸다고 알리면, 지운 사람에게 없던 일을 말하는 것이 된다.
+      if (file !== null && (file.clauses.length > 0 || file.camera !== null)) {
+        const restored = fromWorkspaceFile(file, rowCount)
+        setEffect(toEffectLevel(restored.effect))
+        setCamera(restored.camera)
+        run({
+          kind: 'select',
+          label:
+            restored.dropped.length === 0
+              ? '저장된 작업 공간 되살리기'
+              : `저장된 작업 공간 되살리기 · 고정 선택 ${restored.dropped.length}개는 표가 달라 버림`,
+          next: () => restored.clauses,
+        })
+      }
+      setReady(true)
+    })
+    return () => {
+      alive = false
+    }
+  }, [rowCount])
+
+  // 조건이 바뀔 때마다 저장한다. 남기는 것은 조건과 카메라뿐이다.
+  useEffect(() => {
+    if (!ready) return
+    // 남길 것이 없으면 빈 파일을 쓰지 않고 지운다. 그래야 "비우기"가 정말 비운 것이 된다.
+    if (clauses.size === 0 && camera === null) {
+      void clearWorkspace()
+      return
+    }
+    void saveWorkspace(toWorkspaceFile({ clauses, rowCount, camera, effect }, new Date()))
+  }, [ready, clauses, rowCount, camera, effect])
+
+  // 안내 문구는 잠깐만 보여 준다. 남은 기록은 활동 기록에 있다.
+  useEffect(() => {
+    if (notice === null) return
+    const timer = window.setTimeout(() => setNotice(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  const exportWorkspace = useCallback(() => {
+    const file = toWorkspaceFile({ clauses, rowCount, camera, effect }, new Date())
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
+    )
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `holo-workspace-${fileStamp(new Date())}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    run({ kind: 'note', label: '작업 공간 내보내기' })
+  }, [clauses, rowCount, camera, effect])
+
+  const importWorkspace = useCallback(
+    async (blob: File) => {
+      let value: unknown
+      try {
+        value = JSON.parse(await blob.text())
+      } catch {
+        setNotice('JSON으로 읽히지 않는 파일이다.')
+        run({ kind: 'note', label: '불러오기 실패 · JSON이 아니다' })
+        return
+      }
+      const parsed = parseWorkspaceFile(value)
+      if (!parsed.ok) {
+        setNotice(parsed.reason)
+        run({ kind: 'note', label: `불러오기 실패 · ${parsed.reason}` })
+        return
+      }
+      const restored = fromWorkspaceFile(parsed.file, rowCount)
+      setEffect(toEffectLevel(restored.effect))
+      setCamera(restored.camera)
+      if (restored.dropped.length > 0) {
+        setNotice(`표가 달라서 고정 선택 ${restored.dropped.length}개는 가져오지 못했다.`)
+      }
+      run({
+        kind: 'select',
+        label: `작업 공간 불러오기 · ${blob.name}`,
+        next: () => restored.clauses,
+      })
+    },
+    [rowCount],
+  )
+
+  const forgetWorkspace = useCallback(() => {
+    void clearWorkspace()
+    setCamera(null)
+    run({ kind: 'select', label: '저장한 작업 공간 비우기', next: () => new Map() })
+  }, [])
 
   const clearAll = useCallback(() => {
     if (clauses.size === 0) return
@@ -222,6 +337,11 @@ export function Workspace() {
         run: () => setEffectLevel(level, label),
       })
     }
+    list.push(
+      { group: '작업 공간', label: '작업 공간 내보내기', run: exportWorkspace },
+      { group: '작업 공간', label: '작업 공간 불러오기', run: () => picker.current?.click() },
+      { group: '작업 공간', label: '저장한 작업 공간 비우기', run: forgetWorkspace },
+    )
     SAMPLE_CATEGORIES.forEach((name, index) => {
       list.push({
         group: '선택',
@@ -235,7 +355,17 @@ export function Workspace() {
       })
     })
     return list
-  }, [state, hasSelection, lasso, effect, clearAll, toggleLasso, setEffectLevel])
+  }, [
+    state,
+    hasSelection,
+    lasso,
+    effect,
+    clearAll,
+    toggleLasso,
+    setEffectLevel,
+    exportWorkspace,
+    forgetWorkspace,
+  ])
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -307,9 +437,13 @@ export function Workspace() {
             lasso={lasso}
             onHover={setHovered}
             onLasso={onLasso}
+            camera={camera}
+            onCameraRest={setCamera}
           />
           <p className="holo-readout">
-            {hoveredText === null ? (
+            {notice !== null ? (
+              <span className="holo-notice">{notice}</span>
+            ) : hoveredText === null ? (
               <span className="holo-caption">
                 점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.
               </span>
@@ -349,6 +483,19 @@ export function Workspace() {
           onPick={onPickRow}
         />
       </section>
+
+      <input
+        ref={picker}
+        type="file"
+        accept="application/json,.json"
+        hidden
+        onChange={(event) => {
+          const blob = event.target.files?.[0]
+          // 같은 파일을 두 번 고를 수 있어야 한다. 값을 비우지 않으면 change가 오지 않는다.
+          event.target.value = ''
+          if (blob) void importWorkspace(blob)
+        }}
+      />
 
       {palette ? <CommandPalette commands={commands} onClose={() => setPalette(false)} /> : null}
     </main>

@@ -1,6 +1,6 @@
 import { Grid, OrbitControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, type ComponentRef, type RefObject } from 'react'
 import {
   AdditiveBlending,
   BufferAttribute,
@@ -9,7 +9,7 @@ import {
   type Camera,
   type ShaderMaterial,
 } from 'three'
-import { categoryPalette, holoColors, type RowMask } from '@holo/core'
+import { categoryPalette, holoColors, type RowMask, type StoredCamera } from '@holo/core'
 import type { SampleTable } from '@holo/data'
 import {
   glowPass,
@@ -35,9 +35,19 @@ export type PointCloudViewProps = {
   lasso: boolean
   onHover: (row: number | null) => void
   onLasso: (rows: RowMask | null, count: number) => void
+  /** 되살릴 카메라. 첫 프레임에만 쓴다. */
+  camera: StoredCamera | null
+  /** 카메라를 놓은 순간의 위치. 드래그하는 동안에는 부르지 않는다. */
+  onCameraRest: (camera: StoredCamera) => void
 }
 
 type CameraHandle = { camera: Camera; width: number; height: number } | null
+
+/** 카메라를 되살릴 것이 없을 때의 자리. */
+const DEFAULT_CAMERA: readonly [number, number, number] = [11, 7, 15]
+
+/** drei의 컨트롤 인스턴스 타입. 직접 적으면 ref 타입이 맞지 않는다. */
+type OrbitControlsHandle = ComponentRef<typeof OrbitControls>
 
 function buildGeometry(table: SampleTable): BufferGeometry {
   const count = table.rowCount
@@ -277,13 +287,24 @@ function LassoLayer(props: {
 }
 
 export function PointCloudView(props: PointCloudViewProps) {
-  const { table, selected, effect, lasso, onHover, onLasso } = props
+  const { table, selected, effect, lasso, onHover, onLasso, camera, onCameraRest } = props
   const handle = useRef<CameraHandle>(null)
+  const controls = useRef<OrbitControlsHandle>(null)
+  const start = camera?.position ?? DEFAULT_CAMERA
+
+  // 되살린 카메라는 첫 프레임에 한 번만 앉힌다. 그 뒤로는 사용자가 움직인 것이 진짜다.
+  const restored = useRef(false)
+  useEffect(() => {
+    if (restored.current || camera === null || !controls.current) return
+    restored.current = true
+    controls.current.target.set(...camera.target)
+    controls.current.update()
+  }, [camera])
 
   return (
     <div className="holo-stage">
       <Canvas
-        camera={{ position: [11, 7, 15], fov: 45, far: 200 }}
+        camera={{ position: [...start], fov: 45, far: 200 }}
         dpr={[1, maxPixelRatio(effect)]}
         // 점은 크기가 0이라 기본 판정 반경으로는 잡히지 않는다. 화면의 점 크기에 맞춰 넓힌다.
         onCreated={({ raycaster }) => {
@@ -302,7 +323,20 @@ export function PointCloudView(props: PointCloudViewProps) {
           infiniteGrid
         />
         {/* 유휴 자동 회전은 기본으로 끈다. 분석 도구를 오래 보고 있어야 하기 때문이다. */}
-        <OrbitControls makeDefault enabled={!lasso} enableDamping dampingFactor={0.12} />
+        <OrbitControls
+          ref={controls}
+          makeDefault
+          enabled={!lasso}
+          enableDamping
+          dampingFactor={0.12}
+          onEnd={() => {
+            const rig = controls.current
+            if (!rig) return
+            const { x, y, z } = rig.object.position
+            const look = rig.target
+            onCameraRest({ position: [x, y, z], target: [look.x, look.y, look.z] })
+          }}
+        />
       </Canvas>
       {lasso ? <LassoLayer table={table} handle={handle} onLasso={onLasso} /> : null}
     </div>
