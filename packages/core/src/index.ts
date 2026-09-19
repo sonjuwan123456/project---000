@@ -31,7 +31,10 @@ export {
   toWorkspaceFile,
 } from './workspaceFile'
 export type {
+  DropReason,
+  DroppedClause,
   ParseResult,
+  RestoreTarget,
   RestoredWorkspace,
   StoredCamera,
   StoredClause,

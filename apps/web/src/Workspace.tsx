@@ -9,6 +9,7 @@ import {
   parseWorkspaceFile,
   toWorkspaceFile,
   type Command,
+  type DroppedClause,
   type RowMask,
   type SelectionClause,
   type SelectionClauses,
@@ -110,6 +111,21 @@ function rangeOf(clauses: SelectionClauses): { min: number; max: number } | null
   return clause?.kind === 'range' ? { min: clause.min, max: clause.max } : null
 }
 
+/**
+ * 버린 조건을 사람에게 알릴 문구. 버린 것이 없으면 null.
+ *
+ * 까닭이 둘이라 수만 세면 왜 사라졌는지 알 수 없다. 표가 달라 버린 것과 컬럼이 없어
+ * 버린 것은 사람이 할 일이 다르다. 앞은 원래 표를 열면 되고, 뒤는 되돌릴 방법이 없다.
+ */
+function droppedNotice(dropped: readonly DroppedClause[]): string | null {
+  const table = dropped.filter((one) => one.reason === 'different-table').length
+  const column = dropped.filter((one) => one.reason === 'missing-column').length
+  const parts: string[] = []
+  if (table > 0) parts.push(`고정 선택 ${table}개는 표가 달라 버림`)
+  if (column > 0) parts.push(`조건 ${column}개는 그 컬럼이 지금 표에 없어 버림`)
+  return parts.length === 0 ? null : parts.join(' · ')
+}
+
 function pickedOf(clauses: SelectionClauses): number | null {
   const clause = clauses.get(TABLE)
   if (clause?.kind !== 'rows') return null
@@ -190,6 +206,19 @@ export function Workspace() {
   const columns = model.lookup
   const rowCount = model.rowCount
 
+  /**
+   * 되살릴 때 견줄 것들을 한 자리에 모은다. 부르는 자리가 둘이라, 흩어 두면 한쪽만
+   * 고치고 넘어가게 된다.
+   */
+  const restoreTarget = useMemo(
+    () => ({
+      rowCount,
+      assetId: model.assetId,
+      hasColumn: (column: string) => columns(column) !== undefined,
+    }),
+    [rowCount, model, columns],
+  )
+
   // 뷰마다 빼는 조건이 달라서 네 번 합친다. 만 행 규모에서는 한 프레임 안에 끝난다.
   const everything = useMemo(
     () => composeSelection(rowCount, clauses, columns),
@@ -236,15 +265,14 @@ export function Workspace() {
       if (!alive) return
       // 비어 있는 파일을 되살렸다고 알리면, 지운 사람에게 없던 일을 말하는 것이 된다.
       if (file !== null && (file.clauses.length > 0 || file.camera !== null)) {
-        const restored = fromWorkspaceFile(file, rowCount)
+        const restored = fromWorkspaceFile(file, restoreTarget)
+        const lost = droppedNotice(restored.dropped)
         setEffect(toEffectLevel(restored.effect))
         setCamera(restored.camera)
         run({
           kind: 'select',
           label:
-            restored.dropped.length === 0
-              ? '저장된 작업 공간 되살리기'
-              : `저장된 작업 공간 되살리기 · 고정 선택 ${restored.dropped.length}개는 표가 달라 버림`,
+            lost === null ? '저장된 작업 공간 되살리기' : `저장된 작업 공간 되살리기 · ${lost}`,
           next: () => restored.clauses,
         })
       }
@@ -263,8 +291,10 @@ export function Workspace() {
       void clearWorkspace()
       return
     }
-    void saveWorkspace(toWorkspaceFile({ clauses, rowCount, camera, effect }, new Date()))
-  }, [ready, clauses, rowCount, camera, effect])
+    void saveWorkspace(
+      toWorkspaceFile({ clauses, rowCount, assetId: model.assetId, camera, effect }, new Date()),
+    )
+  }, [ready, clauses, rowCount, model, camera, effect])
 
   // 안내 문구는 잠깐만 보여 준다. 남은 기록은 활동 기록에 있다.
   useEffect(() => {
@@ -274,7 +304,10 @@ export function Workspace() {
   }, [notice])
 
   const exportWorkspace = useCallback(() => {
-    const file = toWorkspaceFile({ clauses, rowCount, camera, effect }, new Date())
+    const file = toWorkspaceFile(
+      { clauses, rowCount, assetId: model.assetId, camera, effect },
+      new Date(),
+    )
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
     )
@@ -284,7 +317,8 @@ export function Workspace() {
     link.click()
     URL.revokeObjectURL(url)
     run({ kind: 'note', label: '작업 공간 내보내기' })
-  }, [clauses, rowCount, camera, effect])
+    // model이 빠지면 행이 같은 수인 다른 표로 갈아 끼웠을 때 예전 자산 id가 적힌다.
+  }, [clauses, rowCount, model, camera, effect])
 
   const importWorkspace = useCallback(
     async (blob: File) => {
@@ -302,19 +336,19 @@ export function Workspace() {
         run({ kind: 'note', label: `불러오기 실패 · ${parsed.reason}` })
         return
       }
-      const restored = fromWorkspaceFile(parsed.file, rowCount)
+      const restored = fromWorkspaceFile(parsed.file, restoreTarget)
+      const lost = droppedNotice(restored.dropped)
       setEffect(toEffectLevel(restored.effect))
       setCamera(restored.camera)
-      if (restored.dropped.length > 0) {
-        setNotice(`표가 달라서 고정 선택 ${restored.dropped.length}개는 가져오지 못했다.`)
-      }
+      if (lost !== null) setNotice(`가져오지 못한 것 · ${lost}`)
       run({
         kind: 'select',
         label: `작업 공간 불러오기 · ${blob.name}`,
         next: () => restored.clauses,
       })
+      // 예전 표의 restoreTarget으로 견주면 버릴 것과 남길 것을 거꾸로 고른다.
     },
-    [rowCount],
+    [restoreTarget],
   )
 
   const forgetWorkspace = useCallback(() => {
