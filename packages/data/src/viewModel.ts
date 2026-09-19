@@ -168,6 +168,28 @@ function positionsFromColumns(
 }
 
 /**
+ * 세 칸 이하짜리 벡터는 줄이지 않고 그대로 좌표로 쓴다.
+ *
+ * 3차원을 주성분 셋으로 줄이는 것은 돌려 놓기일 뿐이라 얻는 것이 없는데, 축
+ * 이름이 emb_0이 아니라 PC1이 되고 "설명력 40% · 35% · 25%"가 붙어서 뭔가를
+ * 잃은 것처럼 읽힌다. 파일에 있던 이름을 그대로 보여 주는 쪽이 맞다.
+ */
+function positionsFromSmallVector(vector: VectorColumn): Positions | null {
+  const { rowCount, dimension, values, missing } = vector
+  if (rowCount === vector.missingCount) return null
+
+  const picked: { name: string; values: ArrayLike<number> }[] = []
+  for (let axis = 0; axis < Math.min(dimension, 3); axis += 1) {
+    const column = new Float32Array(rowCount)
+    for (let row = 0; row < rowCount; row += 1) {
+      column[row] = missing[row] === 1 ? Number.NaN : (values[row * dimension + axis] ?? Number.NaN)
+    }
+    picked.push({ name: `${vector.name}_${axis}`, values: column })
+  }
+  return positionsFromColumns(rowCount, picked)
+}
+
+/**
  * 임베딩을 주성분 셋으로 줄여 좌표를 만든다.
  *
  * 축마다 퍼짐이 크게 다르므로(첫 축이 셋째 축의 몇 배다) 각 축을 따로 맞춘다.
@@ -327,7 +349,10 @@ function biggestVectorOf(table: LoadedTable): VectorColumn | null {
  */
 export function vectorToReduce(table: LoadedTable): VectorColumn | null {
   if (rankNumeric(table).length >= 3) return null
-  return biggestVectorOf(table)
+  const vector = biggestVectorOf(table)
+  // 세 칸 이하면 줄일 것이 없다. 그대로 축 셋으로 쓴다.
+  if (vector === null || vector.dimension <= 3) return null
+  return vector
 }
 
 export type ViewModelOptions = {
@@ -356,7 +381,9 @@ export function toViewModel(
   let position = fromColumns
   let positionPending = false
   if (position === null && biggestVector !== null) {
-    if (options.reduced != null) {
+    if (biggestVector.dimension <= 3) {
+      position = positionsFromSmallVector(biggestVector)
+    } else if (options.reduced != null) {
       position = positionsFromVector(biggestVector, options.reduced)
     } else if (options.awaitingReduction === true) {
       positionPending = true

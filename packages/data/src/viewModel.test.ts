@@ -36,6 +36,19 @@ describe('좌표 고르기', () => {
     expect(model.positionMissing).toBeNull()
   })
 
+  it('세 칸짜리 벡터는 줄이지 않고 그대로 축으로 쓴다', () => {
+    /*
+     * 3차원을 주성분 셋으로 줄이는 것은 돌려 놓기일 뿐이다. 얻는 것 없이 축
+     * 이름만 PC1로 바뀌고 설명력이 붙어 뭔가를 잃은 것처럼 읽힌다.
+     */
+    const lines = ['emb_0,emb_1,emb_2']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row},${row * 2},${row * 5}`)
+    const model = csv(lines)
+    expect(model.position?.axes).toEqual(['emb_0', 'emb_1', 'emb_2'])
+    expect(model.position?.derivedFrom).toBeNull()
+    expect(model.positionPending).toBe(false)
+  })
+
   it('숫자 컬럼이 셋 있으면 임베딩이 있어도 그 컬럼을 쓴다', () => {
     // 사용자가 아는 축이 이름 없는 주성분보다 읽기 쉽다.
     const lines = ['매출,방문,체류,emb_0,emb_1,emb_2']
@@ -140,6 +153,12 @@ describe('줄이는 계산을 워커에 맡길 때', () => {
 
   it('줄여야 할 임베딩을 짚어 준다', () => {
     expect(vectorToReduce(embeddingTable())?.dimension).toBe(4)
+  })
+
+  it('세 칸 이하짜리 벡터는 워커로 보내지 않는다', () => {
+    const lines = ['emb_0,emb_1,emb_2']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row},${row * 2},${row * 5}`)
+    expect(vectorToReduce(loadDelimitedText(lines.join('\n')))).toBeNull()
   })
 
   it('숫자 컬럼만으로 좌표가 서면 줄일 것이 없다', () => {
