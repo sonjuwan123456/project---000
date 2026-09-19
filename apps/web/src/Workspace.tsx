@@ -559,7 +559,8 @@ export function Workspace() {
               <span className="holo-notice">{notice}</span>
             ) : hoveredText === null ? (
               <span className="holo-caption">
-                점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.
+                {model.position?.derivedFrom ??
+                  '점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.'}
               </span>
             ) : (
               <>

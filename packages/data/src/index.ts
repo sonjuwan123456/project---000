@@ -31,6 +31,9 @@ export {
 } from './readTableFile'
 export type { ReadableFile } from './readTableFile'
 
+export { DEFAULT_PCA, pcaTo3D } from './pca'
+export type { PcaOptions, PcaResult } from './pca'
+
 export { toViewModel } from './viewModel'
 export type {
   CategoryRole,

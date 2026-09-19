@@ -11,6 +11,7 @@
 
 import { MAX_COLORED_CATEGORIES, OVERFLOW_CATEGORY, type ColumnLookup } from '@holo/core'
 import type { LoadedCategoryColumn, LoadedColumn, LoadedTable } from './loadTable'
+import { pcaTo3D } from './pca'
 import type { VectorColumn } from './vectorColumn'
 
 export type CellKind = 'text' | 'tag' | 'num'
@@ -34,6 +35,8 @@ export type Positions = {
   readonly missingCount: number
   /** 어느 컬럼에서 왔는지. 화면에 축 이름으로 보여 준다. */
   readonly axes: readonly [string, string, string]
+  /** 차원 축소로 만든 좌표면 어떻게 만들었는지. 원본 컬럼을 그대로 쓴 경우 null. */
+  readonly derivedFrom: string | null
 }
 
 export type CategoryRole = {
@@ -158,6 +161,28 @@ function positionsFromColumns(
     missing,
     missingCount,
     axes: [first?.name ?? '', second?.name ?? '', third?.name ?? ''],
+    derivedFrom: null,
+  }
+}
+
+/**
+ * 임베딩을 주성분 셋으로 줄여 좌표를 만든다.
+ *
+ * 축마다 퍼짐이 크게 다르므로(첫 축이 셋째 축의 몇 배다) 각 축을 따로 맞춘다.
+ * 비율을 그대로 두면 구름이 납작한 판이 되어 돌려 봐도 안쪽이 안 보인다.
+ */
+function positionsFromVector(vector: VectorColumn): Positions | null {
+  const result = pcaTo3D(vector)
+  if (result.missingCount >= vector.rowCount) return null
+  const share = result.explained.map((value) => `${Math.round(value * 100)}%`).join(' · ')
+  return {
+    x: scaleAxis(result.x, vector.rowCount, AXIS_SPAN),
+    y: scaleAxis(result.y, vector.rowCount, AXIS_SPAN * 0.7),
+    z: scaleAxis(result.z, vector.rowCount, AXIS_SPAN),
+    missing: result.missing,
+    missingCount: result.missingCount,
+    axes: ['PC1', 'PC2', 'PC3'],
+    derivedFrom: `${vector.name} ${vector.dimension}차원을 주성분 셋으로 줄였습니다 (설명력 ${share})`,
   }
 }
 
@@ -266,7 +291,7 @@ function viewColumnOf(column: LoadedColumn): ViewColumn {
 
 function missingReason(vectors: readonly VectorColumn[], numericCount: number): string {
   if (vectors.length > 0) {
-    return `임베딩은 있지만 아직 3D 좌표로 줄이지 못합니다. 차원 축소(PCA·UMAP)가 붙어야 합니다.`
+    return '임베딩에서 좌표를 만들지 못했습니다. 값이 있는 행이 없거나 차원이 비어 있습니다.'
   }
   return `3D로 놓으려면 숫자 컬럼이 세 개는 있어야 하는데 ${numericCount}개뿐입니다.`
 }
@@ -282,8 +307,18 @@ export function toViewModel(table: LoadedTable, label: string): ViewModel {
     .filter((entry) => entry.spread > 0)
     .sort((a, b) => b.spread - a.spread)
 
-  const position =
+  /*
+   * 숫자 컬럼이 이미 셋 있으면 그것을 쓴다. 사용자가 아는 축(매출·방문·체류)이
+   * 이름 없는 주성분보다 읽기 쉽다. 임베딩밖에 없을 때만 줄인다.
+   */
+  const fromColumns =
     ranked.length >= 3 ? positionsFromColumns(table.rowCount, ranked.slice(0, 3)) : null
+  const biggestVector = table.vectors.reduce<VectorColumn | null>(
+    (best, vector) => (best === null || vector.dimension > best.dimension ? vector : best),
+    null,
+  )
+  const position =
+    fromColumns ?? (biggestVector === null ? null : positionsFromVector(biggestVector))
   const positionMissing = position === null ? missingReason(table.vectors, numeric.length) : null
 
   /*

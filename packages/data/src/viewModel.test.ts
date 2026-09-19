@@ -25,13 +25,25 @@ describe('좌표 고르기', () => {
     expect(model.positionMissing).toContain('세 개')
   })
 
-  it('임베딩이 있으면 차원 축소가 필요하다고 말한다', () => {
+  it('숫자 컬럼이 없고 임베딩만 있으면 주성분으로 줄여서 좌표를 만든다', () => {
     const lines = ['emb_0,emb_1,emb_2,emb_3']
     for (let row = 0; row < 20; row += 1) lines.push(`${row},${row + 1},${row + 2},${row + 3}`)
     const model = csv(lines)
-    // 넓은 형태가 벡터로 묶여서 숫자 컬럼이 남지 않는다.
-    expect(model.position).toBeNull()
-    expect(model.positionMissing).toContain('차원 축소')
+    // 넓은 형태가 벡터로 묶여서 숫자 컬럼이 남지 않는다. 그때만 줄인다.
+    expect(model.position?.axes).toEqual(['PC1', 'PC2', 'PC3'])
+    expect(model.position?.derivedFrom).toContain('주성분')
+    expect(model.positionMissing).toBeNull()
+  })
+
+  it('숫자 컬럼이 셋 있으면 임베딩이 있어도 그 컬럼을 쓴다', () => {
+    // 사용자가 아는 축이 이름 없는 주성분보다 읽기 쉽다.
+    const lines = ['매출,방문,체류,emb_0,emb_1,emb_2']
+    for (let row = 0; row < 20; row += 1) {
+      lines.push(`${row * 3},${row * 7},${row * 2},${row},${row + 1},${row + 2}`)
+    }
+    const model = csv(lines)
+    expect(model.position?.derivedFrom).toBeNull()
+    expect(model.position?.axes).toContain('매출')
   })
 
   it('값이 하나뿐인 축은 좌표로 쓰지 않는다', () => {
