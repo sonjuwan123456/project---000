@@ -9,6 +9,7 @@
  */
 
 import { DEFAULT_PCA, pcaTo3D, type PcaOptions } from './pca'
+import { transferable, workerScope } from './workerSupport'
 
 export type PcaRequest = {
   readonly id: number
@@ -33,14 +34,6 @@ export type PcaResponse =
       readonly explained: readonly [number, number, number]
     }
   | { readonly id: number; readonly ok: false; readonly message: string }
-
-/**
- * 넘길 버퍼. slice()로 뜬 타입 배열의 buffer는 언제나 평범한 ArrayBuffer지만,
- * 타입은 SharedArrayBuffer일 수도 있다고 본다. 그 한 줄을 여기서 좁힌다.
- */
-function transferable(view: { buffer: ArrayBufferLike }): ArrayBuffer {
-  return view.buffer as ArrayBuffer
-}
 
 /** 요청 하나를 처리한다. 워커 밖에서도 부를 수 있게 떼어 둔다(시험이 쓴다). */
 export function handlePcaRequest(request: PcaRequest): {
@@ -85,15 +78,8 @@ export function handlePcaRequest(request: PcaRequest): {
 }
 
 // 워커로 불린 경우에만 귀를 연다. 시험은 이 파일을 그냥 불러다 위 함수만 쓴다.
-type WorkerScope = {
-  onmessage: ((event: MessageEvent<PcaRequest>) => void) | null
-  postMessage(message: PcaResponse, transfer: ArrayBuffer[]): void
-  window?: unknown
-}
-
-const scope = globalThis as unknown as Partial<WorkerScope>
-// 창이 없고 postMessage가 있는 전역은 워커뿐이다.
-if (scope.window === undefined && typeof scope.postMessage === 'function') {
+const scope = workerScope<PcaRequest, PcaResponse>()
+if (scope !== null) {
   scope.onmessage = (event) => {
     const { response, transfer } = handlePcaRequest(event.data)
     scope.postMessage?.(response, transfer)

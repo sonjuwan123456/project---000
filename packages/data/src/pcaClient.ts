@@ -12,25 +12,13 @@
 import { DEFAULT_PCA, pcaTo3D, type PcaOptions, type PcaResult } from './pca'
 import type { PcaRequest, PcaResponse } from './pcaWorker'
 import type { VectorColumn } from './vectorColumn'
+import { canUseWorker, transferable } from './workerSupport'
 
 export type PcaJob = {
   /** 계산 결과. cancel()을 부른 뒤에는 끝나지 않는다. */
   readonly result: Promise<PcaResult>
   /** 계산을 멈추고 워커를 닫는다. 이미 끝났으면 아무 일도 없다. */
   cancel(): void
-}
-
-/** 이 자리에서 워커를 만들 수 있는지. */
-export function canUseWorker(): boolean {
-  return typeof Worker !== 'undefined'
-}
-
-/**
- * 넘길 버퍼. slice()로 뜬 타입 배열의 buffer는 언제나 평범한 ArrayBuffer지만,
- * 타입은 SharedArrayBuffer일 수도 있다고 본다. 그 한 줄을 여기서 좁힌다.
- */
-function transferable(view: { buffer: ArrayBufferLike }): ArrayBuffer {
-  return view.buffer as ArrayBuffer
 }
 
 let nextId = 1

@@ -35,8 +35,15 @@ export type { ReadableFile } from './readTableFile'
 export { DEFAULT_PCA, pcaTo3D } from './pca'
 export type { PcaOptions, PcaResult } from './pca'
 
-export { canUseWorker, startPca } from './pcaClient'
+export { canUseWorker } from './workerSupport'
+
+export { startPca } from './pcaClient'
 export type { PcaJob } from './pcaClient'
+
+export { startTableRead } from './tableClient'
+export type { TableJob } from './tableClient'
+
+export type { TableRequest, TableResponse } from './tableWorker'
 
 export type { PcaRequest, PcaResponse } from './pcaWorker'
 
@@ -51,7 +58,7 @@ export type {
   ViewModelOptions,
 } from './viewModel'
 
-export { buildTable, loadDelimitedText } from './loadTable'
+export { attachLookup, buildTable, loadDelimitedText } from './loadTable'
 export type {
   BuildOptions,
   LoadDelimitedOptions,
@@ -61,5 +68,6 @@ export type {
   LoadedDatetimeColumn,
   LoadedNumberColumn,
   LoadedTable,
+  LoadedTableData,
   LoadedTextColumn,
 } from './loadTable'

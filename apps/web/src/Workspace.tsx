@@ -19,13 +19,14 @@ import {
 import {
   UnsupportedFileError,
   loadDelimitedText,
-  readTableFile,
   sampleCsv,
   startPca,
+  startTableRead,
   toViewModel,
   vectorToReduce,
   type LoadedTable,
   type PcaResult,
+  type TableJob,
   type ViewModel,
 } from '@holo/data'
 import type { EffectLevel } from '@holo/holo-fx'
@@ -337,21 +338,46 @@ export function Workspace() {
     openTable(sampleLoadedTable(), '고객문의 샘플')
   }, [openTable])
 
+  /*
+   * 파일 읽기도 워커에서 돈다. 5만 행짜리 파일이면 읽기·파싱·종류 판별에 수 초가
+   * 걸리고, 본 스레드에서 돌리면 그동안 화면이 통째로 굳는다.
+   *
+   * 읽는 동안에는 이전 표가 그대로 보인다. 화면을 비워 두면 잘못 떨어뜨렸을 때
+   * 돌아갈 자리가 없어진다.
+   */
+  const reading = useRef<TableJob | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const openFile = useCallback(
     async (blob: File) => {
+      reading.current?.cancel()
+      const job = startTableRead(blob)
+      reading.current = job
+      setNotice(null)
+      setBusy(blob.name)
       try {
-        openTable(await readTableFile(blob), blob.name)
+        const table = await job.result
+        if (reading.current !== job) return
+        openTable(table, blob.name)
       } catch (error) {
+        if (reading.current !== job) return
         const message =
           error instanceof UnsupportedFileError
             ? error.message
             : `'${blob.name}'을(를) 읽지 못했다.`
         setNotice(message)
         run({ kind: 'note', label: `파일 열기 실패 · ${blob.name}` })
+      } finally {
+        if (reading.current === job) {
+          reading.current = null
+          setBusy(null)
+        }
       }
     },
     [openTable],
   )
+
+  // 화면을 떠날 때 읽던 것을 멈춘다. 워커가 남아 계속 돌면 안 된다.
+  useEffect(() => () => reading.current?.cancel(), [])
 
   const clearAll = useCallback(() => {
     if (clauses.size === 0) return
@@ -607,7 +633,9 @@ export function Workspace() {
             />
           )}
           <p className="holo-readout">
-            {notice !== null ? (
+            {busy !== null ? (
+              <span className="holo-caption">{busy}을(를) 읽고 있습니다…</span>
+            ) : notice !== null ? (
               <span className="holo-notice">{notice}</span>
             ) : hoveredText === null ? (
               <span className="holo-caption">

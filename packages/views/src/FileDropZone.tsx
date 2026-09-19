@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
-import { UnsupportedFileError, readTableFile, type LoadedTable } from '@holo/data'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { UnsupportedFileError, startTableRead, type LoadedTable, type TableJob } from '@holo/data'
 
 /**
  * 파일을 끌어다 놓는 자리 — 대표 사용 흐름의 1단계.
@@ -8,6 +8,9 @@ import { UnsupportedFileError, readTableFile, type LoadedTable } from '@holo/dat
  *
  * `dragleave`는 자식 위를 지나갈 때도 올라온다. 들어온 횟수를 세지 않으면 테두리가
  * 끌고 있는 내내 깜빡인다.
+ *
+ * 읽기는 워커에서 돈다. 5만 행짜리 파일이면 본 스레드에서 수 초가 걸리고, 그동안
+ * "읽는 중" 글자조차 그려지지 않아 앱이 죽은 것처럼 보인다.
  */
 export type FileDropZoneProps = {
   /** 다 읽으면 표와 파일 이름을 넘긴다. 무엇을 띄울지는 받는 쪽이 정한다. */
@@ -27,19 +30,31 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
   const depth = useRef(0)
   const picker = useRef<HTMLInputElement>(null)
 
+  /** 지금 읽고 있는 일감. 새 파일이 오거나 화면을 떠나면 멈춘다. */
+  const reading = useRef<TableJob | null>(null)
+  useEffect(() => () => reading.current?.cancel(), [])
+
   const load = useCallback(
     async (file: File) => {
+      reading.current?.cancel()
+      const job = startTableRead(file)
+      reading.current = job
       setPhase({ kind: 'reading', fileName: file.name })
       try {
-        const table = await readTableFile(file)
+        const table = await job.result
+        // 그사이 다른 파일이 들어왔으면 이 결과는 버린다.
+        if (reading.current !== job) return
         setPhase({ kind: 'idle' })
         onLoaded(table, file.name)
       } catch (error) {
+        if (reading.current !== job) return
         const message =
           error instanceof UnsupportedFileError
             ? error.message
             : `'${file.name}'을(를) 읽지 못했습니다. 파일이 온전한지 확인해 주세요.`
         setPhase({ kind: 'error', message })
+      } finally {
+        if (reading.current === job) reading.current = null
       }
     },
     [onLoaded],

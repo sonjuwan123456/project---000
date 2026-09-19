@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pcaTo3D } from './pca'
-import { canUseWorker, startPca } from './pcaClient'
+import { startPca } from './pcaClient'
+import { canUseWorker } from './workerSupport'
 import { handlePcaRequest, type PcaRequest } from './pcaWorker'
 import { vectorFromLists, type VectorColumn } from './vectorColumn'
 
