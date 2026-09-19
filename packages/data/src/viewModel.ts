@@ -11,7 +11,7 @@
 
 import { MAX_COLORED_CATEGORIES, OVERFLOW_CATEGORY, type ColumnLookup } from '@holo/core'
 import type { LoadedCategoryColumn, LoadedColumn, LoadedTable } from './loadTable'
-import { pcaTo3D } from './pca'
+import { pcaTo3D, type PcaResult } from './pca'
 import type { VectorColumn } from './vectorColumn'
 
 export type CellKind = 'text' | 'tag' | 'num'
@@ -70,6 +70,8 @@ export type ViewModel = {
   readonly position: Positions | null
   /** 좌표를 못 만든 이유. `position`이 null일 때만 있다. */
   readonly positionMissing: string | null
+  /** 좌표를 아직 만드는 중인지. true면 `positionMissing`은 실패가 아니라 기다림이다. */
+  readonly positionPending: boolean
   readonly category: CategoryRole | null
   readonly measure: MeasureRole | null
   readonly columns: readonly ViewColumn[]
@@ -171,8 +173,8 @@ function positionsFromColumns(
  * 축마다 퍼짐이 크게 다르므로(첫 축이 셋째 축의 몇 배다) 각 축을 따로 맞춘다.
  * 비율을 그대로 두면 구름이 납작한 판이 되어 돌려 봐도 안쪽이 안 보인다.
  */
-function positionsFromVector(vector: VectorColumn): Positions | null {
-  const result = pcaTo3D(vector)
+function positionsFromVector(vector: VectorColumn, reduced?: PcaResult): Positions | null {
+  const result = reduced ?? pcaTo3D(vector)
   if (result.missingCount >= vector.rowCount) return null
   const share = result.explained.map((value) => `${Math.round(value * 100)}%`).join(' · ')
   return {
@@ -296,9 +298,11 @@ function missingReason(vectors: readonly VectorColumn[], numericCount: number): 
   return `3D로 놓으려면 숫자 컬럼이 세 개는 있어야 하는데 ${numericCount}개뿐입니다.`
 }
 
-export function toViewModel(table: LoadedTable, label: string): ViewModel {
-  const numeric = table.columns.filter((column) => column.kind === 'number')
-  const ranked = numeric
+type RankedColumn = { name: string; values: ArrayLike<number>; spread: number }
+
+function rankNumeric(table: LoadedTable): RankedColumn[] {
+  return table.columns
+    .filter((column) => column.kind === 'number')
     .map((column) => ({
       name: column.name,
       values: column.values as ArrayLike<number>,
@@ -306,6 +310,40 @@ export function toViewModel(table: LoadedTable, label: string): ViewModel {
     }))
     .filter((entry) => entry.spread > 0)
     .sort((a, b) => b.spread - a.spread)
+}
+
+function biggestVectorOf(table: LoadedTable): VectorColumn | null {
+  return table.vectors.reduce<VectorColumn | null>(
+    (best, vector) => (best === null || vector.dimension > best.dimension ? vector : best),
+    null,
+  )
+}
+
+/**
+ * 좌표를 만들려면 줄여야 하는 임베딩. 숫자 컬럼만으로 좌표가 서면 null이다.
+ *
+ * 줄이는 일은 무거워서 워커로 보낸다(pcaClient의 startPca). 보낼지 말지를 화면 쪽에서
+ * 정하려면 "이 표는 줄여야 하는가"를 뷰 모델을 만들기 전에 물을 수 있어야 한다.
+ */
+export function vectorToReduce(table: LoadedTable): VectorColumn | null {
+  if (rankNumeric(table).length >= 3) return null
+  return biggestVectorOf(table)
+}
+
+export type ViewModelOptions = {
+  /** 워커가 이미 줄여 둔 결과. 있으면 이것으로 좌표를 만든다. */
+  readonly reduced?: PcaResult | null
+  /** true면 임베딩을 여기서 줄이지 않는다. 워커 결과를 기다리는 중이라는 뜻이다. */
+  readonly awaitingReduction?: boolean
+}
+
+export function toViewModel(
+  table: LoadedTable,
+  label: string,
+  options: ViewModelOptions = {},
+): ViewModel {
+  const numeric = table.columns.filter((column) => column.kind === 'number')
+  const ranked = rankNumeric(table)
 
   /*
    * 숫자 컬럼이 이미 셋 있으면 그것을 쓴다. 사용자가 아는 축(매출·방문·체류)이
@@ -313,13 +351,26 @@ export function toViewModel(table: LoadedTable, label: string): ViewModel {
    */
   const fromColumns =
     ranked.length >= 3 ? positionsFromColumns(table.rowCount, ranked.slice(0, 3)) : null
-  const biggestVector = table.vectors.reduce<VectorColumn | null>(
-    (best, vector) => (best === null || vector.dimension > best.dimension ? vector : best),
-    null,
-  )
-  const position =
-    fromColumns ?? (biggestVector === null ? null : positionsFromVector(biggestVector))
-  const positionMissing = position === null ? missingReason(table.vectors, numeric.length) : null
+  const biggestVector = fromColumns === null ? biggestVectorOf(table) : null
+
+  let position = fromColumns
+  let positionPending = false
+  if (position === null && biggestVector !== null) {
+    if (options.reduced != null) {
+      position = positionsFromVector(biggestVector, options.reduced)
+    } else if (options.awaitingReduction === true) {
+      positionPending = true
+    } else {
+      position = positionsFromVector(biggestVector)
+    }
+  }
+
+  const positionMissing =
+    position !== null
+      ? null
+      : positionPending && biggestVector !== null
+        ? `${biggestVector.name} ${biggestVector.dimension}차원을 주성분 셋으로 줄이고 있습니다.`
+        : missingReason(table.vectors, numeric.length)
 
   /*
    * 색을 나눌 범주는 값이 적은 쪽을 고른다. 값이 수백 개인 컬럼으로 칠하면
@@ -369,6 +420,7 @@ export function toViewModel(table: LoadedTable, label: string): ViewModel {
     lookup: table.lookup,
     position,
     positionMissing,
+    positionPending,
     category,
     measure,
     columns,

@@ -35,13 +35,22 @@ export type PcaOptions = {
 
 export const DEFAULT_PCA: PcaOptions = { fitSample: 5000, iterations: 24 }
 
-/** 축을 찾는 데 쓸 행. 앞에서부터 자르지 않고 고르게 솎는다 — 파일이 정렬돼 있을 수 있다. */
+/**
+ * 축을 찾는 데 쓸 행. 앞에서부터 자르지 않는다 — 파일이 정렬돼 있을 수 있다.
+ *
+ * 일정한 간격으로 솎으면 안 된다. 간격이 파일의 주기와 맞아떨어지면 한 부류만
+ * 뽑힌다(네 줄마다 같은 부류가 오는 파일을 네 칸씩 건너뛰면 그 부류만 남는다).
+ * 황금비 간격은 주기가 없어서 어떤 파일에도 걸리지 않으면서, 고르게 퍼진다.
+ * 씨앗이 없어도 언제나 같은 행을 뽑으니 결과는 그대로 재현된다.
+ */
+const GOLDEN = 0.618033988749895
+
 function fitRows(rows: Int32Array, limit: number): Int32Array {
   if (rows.length <= limit) return rows
-  const step = rows.length / limit
   const picked = new Int32Array(limit)
   for (let index = 0; index < limit; index += 1) {
-    picked[index] = rows[Math.floor(index * step)] ?? 0
+    const at = Math.floor(((index * GOLDEN) % 1) * rows.length)
+    picked[index] = rows[at] ?? 0
   }
   return picked
 }
@@ -85,17 +94,24 @@ export function pcaTo3D(vector: VectorColumn, options: PcaOptions = DEFAULT_PCA)
     return { x, y, z, missing: gone, missingCount, explained: [0, 0, 0] }
   }
 
-  // 중심을 옮기지 않으면 첫 축이 평균 방향을 가리켜 버린다.
+  const sample = fitRows(rows, options.fitSample)
+
+  /*
+   * 중심을 옮기지 않으면 첫 축이 평균 방향을 가리켜 버린다.
+   *
+   * 중심은 축을 찾는 데 쓸 행들에서 낸다. 모든 행에서 내면, 솎아 낸 표본이
+   * 한쪽으로 치우쳤을 때 표본 전체가 중심에서 밀려난 자리에 놓인다. 그러면 첫
+   * 축이 데이터의 퍼짐이 아니라 그 밀린 방향을 가리키고, 설명력도 그만큼 부풀려진다.
+   */
   const mean = new Float64Array(dimension)
-  for (const row of rows) {
+  for (const row of sample) {
     const base = row * dimension
     for (let axis = 0; axis < dimension; axis += 1) {
       mean[axis] = (mean[axis] ?? 0) + (values[base + axis] ?? 0)
     }
   }
-  for (let axis = 0; axis < dimension; axis += 1) mean[axis] = (mean[axis] ?? 0) / rows.length
+  for (let axis = 0; axis < dimension; axis += 1) mean[axis] = (mean[axis] ?? 0) / sample.length
 
-  const sample = fitRows(rows, options.fitSample)
   const centered = new Float64Array(sample.length * dimension)
   let totalVariance = 0
   for (let index = 0; index < sample.length; index += 1) {

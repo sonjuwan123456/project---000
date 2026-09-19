@@ -21,8 +21,11 @@ import {
   loadDelimitedText,
   readTableFile,
   sampleCsv,
+  startPca,
   toViewModel,
+  vectorToReduce,
   type LoadedTable,
+  type PcaResult,
   type ViewModel,
 } from '@holo/data'
 import type { EffectLevel } from '@holo/holo-fx'
@@ -113,15 +116,60 @@ function pickedOf(clauses: SelectionClauses): number | null {
   return row === -1 ? null : row
 }
 
+/** 임베딩을 줄이는 계산이 어디까지 갔는지. 표 이름을 달아 지난 표의 결과를 걸러 낸다. */
+type Reduction =
+  | { kind: 'idle' }
+  | { kind: 'running'; assetId: string }
+  | { kind: 'done'; assetId: string; result: PcaResult }
+  | { kind: 'failed'; assetId: string }
+
 export function Workspace() {
   const [source, setSource] = useState<{ table: LoadedTable; label: string }>(() => ({
     table: sampleLoadedTable(),
     label: '고객문의 샘플',
   }))
-  const model: ViewModel = useMemo(
-    () => toViewModel(source.table, source.label),
-    [source.table, source.label],
-  )
+  /*
+   * 임베딩을 줄이는 계산은 워커로 보낸다. 2만 행 384차원이면 0.5초가 넘어서,
+   * 주 스레드에서 돌리면 파일을 연 순간 화면이 굳는다. 결과가 오기 전까지는
+   * 좌표 없는 뷰 모델을 쓴다 — 표와 분포 그래프는 그동안에도 만질 수 있다.
+   *
+   * 결과에 표 이름을 같이 달아 둔다. 표를 갈아 끼우는 사이에 지난 계산이 돌아와
+   * 다른 표의 좌표를 그리면 안 된다.
+   */
+  const [reduction, setReduction] = useState<Reduction>({ kind: 'idle' })
+
+  useEffect(() => {
+    const vector = vectorToReduce(source.table)
+    const { assetId } = source.table
+    if (vector === null) {
+      setReduction({ kind: 'idle' })
+      return
+    }
+    setReduction({ kind: 'running', assetId })
+    const job = startPca(vector)
+    let alive = true
+    void job.result
+      .then((result) => {
+        if (alive) setReduction({ kind: 'done', assetId, result })
+      })
+      .catch(() => {
+        // 실패하면 좌표 없이 둔다. 뷰 모델이 "만들지 못했다"고 말해 준다.
+        if (alive) setReduction({ kind: 'failed', assetId })
+      })
+    return () => {
+      alive = false
+      job.cancel()
+    }
+  }, [source.table])
+
+  const model: ViewModel = useMemo(() => {
+    const current = reduction.kind !== 'idle' && reduction.assetId === source.table.assetId
+    return toViewModel(source.table, source.label, {
+      reduced: current && reduction.kind === 'done' ? reduction.result : null,
+      // 계산이 도는 중일 때만 기다린다. 실패했으면 이유를 보여 줘야 한다.
+      awaitingReduction: !current || reduction.kind === 'running',
+    })
+  }, [source.table, source.label, reduction])
   const [state, run] = useReducer(reduce, undefined, () =>
     createWorkspaceState('작업 공간 열기 · 고객문의 샘플'),
   )
@@ -538,7 +586,11 @@ export function Workspace() {
           {model.position === null ? (
             <div className="holo-stage-empty">
               <p>{model.positionMissing}</p>
-              <p className="holo-caption">표와 분포 그래프는 그대로 쓸 수 있습니다.</p>
+              <p className="holo-caption">
+                {model.positionPending
+                  ? '계산은 화면 밖에서 돕니다. 그동안에도 표와 분포 그래프는 만질 수 있습니다.'
+                  : '표와 분포 그래프는 그대로 쓸 수 있습니다.'}
+              </p>
             </div>
           ) : (
             <PointCloudView

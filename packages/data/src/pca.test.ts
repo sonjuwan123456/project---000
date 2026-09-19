@@ -47,7 +47,8 @@ describe('pcaTo3D', () => {
     for (let row = 0; row < 400; row += 1) {
       rows.push([random() * 30, random() * 12, random() * 4, random() * 0.2])
     }
-    const result = pcaTo3D(vectorFromLists('emb', rows))
+    // 8000행을 2000개로 솎으면 간격이 정확히 4다 — 파일의 주기와 맞아떨어진다.
+    const result = pcaTo3D(vectorFromLists('emb', rows), { fitSample: 2000, iterations: 24 })
     expect(result.explained[0]).toBeGreaterThan(result.explained[1])
     expect(result.explained[1]).toBeGreaterThan(result.explained[2])
     expect(result.explained[0] + result.explained[1] + result.explained[2]).toBeLessThanOrEqual(
@@ -97,5 +98,38 @@ describe('pcaTo3D', () => {
     const a = pcaTo3D(near)
     const b = pcaTo3D(far)
     expect(b.explained[0]).toBeCloseTo(a.explained[0] ?? 0, 3)
+  })
+
+  it('부류가 주기적으로 되풀이되는 파일에서도 축을 제대로 찾는다', () => {
+    /*
+     * 표본을 일정한 간격으로 솎으면, 그 간격이 파일의 주기와 맞을 때 한 부류만
+     * 뽑힌다. 그러면 표본이 중심에서 밀려나 첫 축이 밀린 방향을 가리키고
+     * 설명력이 80%대로 부풀려진다. 네 줄마다 같은 부류가 오는 파일로 잡아 둔다.
+     */
+    let state = 3
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) | 0
+      return (state >>> 8) / 0x1000000 - 0.5
+    }
+    const dimension = 24
+    const centers = [0, 1, 2, 3].map((group) =>
+      Array.from({ length: dimension }, (_, axis) => (axis === group ? 4 : 0)),
+    )
+    const rows: number[][] = []
+    for (let row = 0; row < 8000; row += 1) {
+      const center = centers[row % 4] ?? []
+      rows.push(
+        Array.from({ length: dimension }, (_, axis) => (center[axis] ?? 0) + random() * 0.2),
+      )
+    }
+    // 8000행을 2000개로 솎으면 간격이 정확히 4다 — 파일의 주기와 맞아떨어진다.
+    const result = pcaTo3D(vectorFromLists('emb', rows), { fitSample: 2000, iterations: 24 })
+
+    // 네 부류는 서로 다른 세 방향으로 갈라진다. 셋 다 비슷하게 설명해야 한다.
+    for (const share of result.explained) expect(share).toBeGreaterThan(0.2)
+    const total = result.explained.reduce((sum, share) => sum + share, 0)
+    expect(total).toBeLessThanOrEqual(1)
+    // 한 축이 전부를 먹으면 그것이 바로 예전에 있던 버그다.
+    expect(Math.max(...result.explained)).toBeLessThan(0.5)
   })
 })

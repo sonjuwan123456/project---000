@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildTable } from './loadTable'
 import { loadDelimitedText } from './loadTable'
-import { toViewModel } from './viewModel'
+import { pcaTo3D } from './pca'
+import { toViewModel, vectorToReduce } from './viewModel'
 
 function csv(lines: readonly string[]) {
   return toViewModel(loadDelimitedText(lines.join('\n')), '시험.csv')
@@ -127,6 +128,58 @@ describe('표에 그릴 칸', () => {
       'B2,결제가 두 번 청구되었습니다',
     ])
     expect(model.rowLabel(0)).toContain('주문한')
+  })
+})
+
+describe('줄이는 계산을 워커에 맡길 때', () => {
+  function embeddingTable() {
+    const lines = ['emb_0,emb_1,emb_2,emb_3']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row},${row + 1},${row + 2},${row + 3}`)
+    return loadDelimitedText(lines.join('\n'))
+  }
+
+  it('줄여야 할 임베딩을 짚어 준다', () => {
+    expect(vectorToReduce(embeddingTable())?.dimension).toBe(4)
+  })
+
+  it('숫자 컬럼만으로 좌표가 서면 줄일 것이 없다', () => {
+    const lines = ['매출,방문,체류']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row * 3},${row * 7},${row * 2}`)
+    expect(vectorToReduce(loadDelimitedText(lines.join('\n')))).toBeNull()
+  })
+
+  it('기다리는 중에는 좌표가 없고 실패가 아니라고 말한다', () => {
+    const model = toViewModel(embeddingTable(), '시험.csv', { awaitingReduction: true })
+    expect(model.position).toBeNull()
+    expect(model.positionPending).toBe(true)
+    expect(model.positionMissing).toContain('줄이고 있습니다')
+  })
+
+  it('워커가 준 결과를 그대로 좌표로 쓴다', () => {
+    const table = embeddingTable()
+    const vector = vectorToReduce(table)
+    expect(vector).not.toBeNull()
+    if (vector === null) return
+    const model = toViewModel(table, '시험.csv', {
+      awaitingReduction: true,
+      reduced: pcaTo3D(vector),
+    })
+    expect(model.positionPending).toBe(false)
+    expect(model.position?.axes).toEqual(['PC1', 'PC2', 'PC3'])
+    // 워커를 거치지 않고 그 자리에서 줄인 것과 좌표가 같아야 한다.
+    expect([...(model.position?.x ?? [])]).toEqual([
+      ...(toViewModel(table, '시험.csv').position?.x ?? []),
+    ])
+  })
+
+  it('숫자 컬럼으로 좌표가 서면 기다리라고 해도 기다리지 않는다', () => {
+    const lines = ['매출,방문,체류']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row * 3},${row * 7},${row * 2}`)
+    const model = toViewModel(loadDelimitedText(lines.join('\n')), '시험.csv', {
+      awaitingReduction: true,
+    })
+    expect(model.positionPending).toBe(false)
+    expect(model.position).not.toBeNull()
   })
 })
 
