@@ -19,6 +19,15 @@ export type { StringVectorFinding, StringVectorFlavor } from './stringVectorGuar
 export { groupWideVectorColumns, vectorFromLists, vectorFromWideColumns } from './vectorColumn'
 export type { VectorColumn, WideVectorGroup } from './vectorColumn'
 
+export {
+  UnsupportedFileError,
+  loadJson,
+  loadJsonLines,
+  loadRecords,
+  readTableFile,
+} from './readTableFile'
+export type { ReadableFile } from './readTableFile'
+
 export { buildTable, loadDelimitedText } from './loadTable'
 export type {
   BuildOptions,

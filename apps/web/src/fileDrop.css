@@ -1,0 +1,74 @@
+/* 파일을 끌어다 놓는 자리. 색은 전부 packages/core의 palette.ts에서 심은 변수다. */
+
+.holo-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+  border: 1px dashed var(--holo-line, #241f2e);
+  border-radius: 12px;
+  background: var(--holo-surface, #0d0b11);
+  color: var(--holo-dim, #938ea6);
+  text-align: center;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.holo-drop.is-compact {
+  padding: 14px 18px;
+  gap: 8px;
+}
+
+.holo-drop.is-dragging {
+  border-color: var(--holo-accent, #5bd1e8);
+  background: color-mix(in srgb, var(--holo-accent, #5bd1e8) 8%, var(--holo-surface, #0d0b11));
+}
+
+.holo-drop.is-reading {
+  border-style: solid;
+}
+
+.holo-drop-title {
+  margin: 0;
+  color: var(--holo-text, #ece9f4);
+  font-size: 15px;
+  word-break: keep-all;
+}
+
+.holo-drop.is-compact .holo-drop-title {
+  font-size: 13px;
+}
+
+.holo-drop-caption {
+  margin: 0;
+  font-size: 12px;
+  color: var(--holo-faint, #635d74);
+}
+
+.holo-drop-error {
+  margin: 0;
+  max-width: 44ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--holo-text, #ece9f4);
+  word-break: keep-all;
+}
+
+/*
+ * 입력란은 눈에서만 감춘다. `display: none`으로 지우면 초점이 가지 않아
+ * 키보드와 화면 낭독기가 파일 고르기에 닿지 못한다.
+ */
+.holo-drop-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

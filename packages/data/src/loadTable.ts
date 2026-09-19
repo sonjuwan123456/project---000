@@ -234,6 +234,11 @@ function uniqueNames(header: readonly string[]): string[] {
 
 export type BuildOptions = {
   readonly inference?: InferenceOptions
+  /**
+   * 타입이 이미 있는 형식(Parquet `list<float>`, JSON 배열)에서 바로 만든 벡터.
+   * 여기로 들어온 벡터는 넓은 형태 묶기를 거치지 않는다.
+   */
+  readonly nativeVectors?: readonly VectorColumn[]
 }
 
 /**
@@ -297,14 +302,17 @@ export function buildTable(
     else columns.push(buildTextColumn(name, raw, profile))
   })
 
-  // 4) 묶인 컬럼을 하나의 연속 버퍼로 옮긴다.
-  const vectors = groups.map((group) =>
-    vectorFromWideColumns(
-      group.name,
-      rowCount,
-      group.columns.map((name) => numericByName.get(name) ?? new Float64Array(rowCount)),
+  // 4) 묶인 컬럼을 하나의 연속 버퍼로 옮긴다. 네이티브 리스트는 이미 그 모양이라 그대로 둔다.
+  const vectors = [
+    ...(options.nativeVectors ?? []),
+    ...groups.map((group) =>
+      vectorFromWideColumns(
+        group.name,
+        rowCount,
+        group.columns.map((name) => numericByName.get(name) ?? new Float64Array(rowCount)),
+      ),
     ),
-  )
+  ]
   for (const group of groups) {
     notices.push({
       level: 'info',
