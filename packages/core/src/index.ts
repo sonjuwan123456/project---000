@@ -16,3 +16,17 @@ export type {
   SelectionClauses,
   SelectionSource,
 } from './selection'
+export {
+  WORKSPACE_FORMAT_VERSION,
+  fromWorkspaceFile,
+  parseWorkspaceFile,
+  toWorkspaceFile,
+} from './workspaceFile'
+export type {
+  ParseResult,
+  RestoredWorkspace,
+  StoredCamera,
+  StoredClause,
+  WorkspaceFile,
+  WorkspaceSnapshot,
+} from './workspaceFile'
