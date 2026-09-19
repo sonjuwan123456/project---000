@@ -178,10 +178,10 @@ export function Workspace() {
    * 저장된 작업 공간을 한 번만 읽어 본다. 이것이 끝나기 전에 저장하면 빈 상태로 덮어쓴다.
    * 표를 갈아 끼울 때 다시 읽으면, 방금 비운 선택 위에 이전 표의 선택이 되살아난다.
    */
-  const restored = useRef(false)
+  const loadedOnce = useRef(false)
   useEffect(() => {
-    if (restored.current) return
-    restored.current = true
+    if (loadedOnce.current) return
+    loadedOnce.current = true
     let alive = true
     void loadWorkspace().then((file) => {
       if (!alive) return
