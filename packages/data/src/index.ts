@@ -5,7 +5,7 @@
  */
 export const PACKAGE_NAME = '@holo/data'
 
-export { SAMPLE_CATEGORIES, createSampleTable, type SampleTable } from './sampleTable'
+export { SAMPLE_CATEGORIES, createSampleTable, sampleCsv, type SampleTable } from './sampleTable'
 
 export { DEFAULT_INFERENCE, isBlank, parseDatetime, parseNumber, profileColumn } from './columnType'
 export type { ColumnProfile, InferenceOptions, ScalarColumnKind } from './columnType'
@@ -30,6 +30,16 @@ export {
   readTableFile,
 } from './readTableFile'
 export type { ReadableFile } from './readTableFile'
+
+export { toViewModel } from './viewModel'
+export type {
+  CategoryRole,
+  CellKind,
+  MeasureRole,
+  Positions,
+  ViewColumn,
+  ViewModel,
+} from './viewModel'
 
 export { buildTable, loadDelimitedText } from './loadTable'
 export type {

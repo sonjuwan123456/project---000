@@ -16,12 +16,21 @@ import {
   type StoredCamera,
   type WorkspaceState,
 } from '@holo/core'
-import { SAMPLE_CATEGORIES, createSampleTable } from '@holo/data'
+import {
+  UnsupportedFileError,
+  loadDelimitedText,
+  readTableFile,
+  sampleCsv,
+  toViewModel,
+  type LoadedTable,
+  type ViewModel,
+} from '@holo/data'
 import type { EffectLevel } from '@holo/holo-fx'
 import {
   ActivityLog,
   CommandPalette,
   DistributionView,
+  FileDropZone,
   PointCloudView,
   TableView,
   type PaletteCommand,
@@ -42,6 +51,13 @@ import { clearWorkspace, loadWorkspace, saveWorkspace } from './workspaceStore'
  * 남길 것이 조건뿐이기 때문이다. 저장은 조건이 바뀔 때마다 알아서 하고, 새로 고치면
  * 그 조건으로 다시 계산한 화면이 나온다.
  */
+
+const SAMPLE_ASSET = 'sample-고객문의'
+
+/** 개발용 샘플도 로더를 거쳐 들어온다. 샘플만 다른 길이면 로더가 깨져도 모른다. */
+function sampleLoadedTable(): LoadedTable {
+  return loadDelimitedText(sampleCsv(12_000), { assetId: SAMPLE_ASSET })
+}
 
 const POINTS: SelectionSource = 'points'
 const TABLE: SelectionSource = 'table'
@@ -98,7 +114,14 @@ function pickedOf(clauses: SelectionClauses): number | null {
 }
 
 export function Workspace() {
-  const table = useMemo(() => createSampleTable(12_000), [])
+  const [source, setSource] = useState<{ table: LoadedTable; label: string }>(() => ({
+    table: sampleLoadedTable(),
+    label: '고객문의 샘플',
+  }))
+  const model: ViewModel = useMemo(
+    () => toViewModel(source.table, source.label),
+    [source.table, source.label],
+  )
   const [state, run] = useReducer(reduce, undefined, () =>
     createWorkspaceState('작업 공간 열기 · 고객문의 샘플'),
   )
@@ -112,10 +135,11 @@ export function Workspace() {
   const [ready, setReady] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const picker = useRef<HTMLInputElement>(null)
+  const tablePicker = useRef<HTMLInputElement>(null)
 
   const { clauses } = state
-  const columns = table.columns
-  const rowCount = table.rowCount
+  const columns = model.lookup
+  const rowCount = model.rowCount
 
   // 뷰마다 빼는 조건이 달라서 네 번 합친다. 만 행 규모에서는 한 프레임 안에 끝난다.
   const everything = useMemo(
@@ -137,13 +161,27 @@ export function Workspace() {
 
   const tableRows = useMemo(() => maskToRowIndices(forTable), [forTable])
 
-  const categories = categoriesOf(clauses)
+  const selectedCodes = categoriesOf(clauses)
+  /** 조건은 원본 코드로 적혀 있고 그래프는 자리 번호로 그린다. 자리마다 대표 코드로 맞춰 본다. */
+  const categorySlots = useMemo(() => {
+    const role = model.category
+    if (role === null || selectedCodes.length === 0) return []
+    return role.codesOfSlot
+      .map((codes, slot) => (codes.some((code) => selectedCodes.includes(code)) ? slot : -1))
+      .filter((slot) => slot >= 0)
+  }, [model, selectedCodes])
   const range = rangeOf(clauses)
   const picked = pickedOf(clauses)
   const hasSelection = clauses.size > 0
 
-  // 저장된 작업 공간을 한 번 읽어 본다. 이것이 끝나기 전에 저장하면 빈 상태로 덮어쓴다.
+  /*
+   * 저장된 작업 공간을 한 번만 읽어 본다. 이것이 끝나기 전에 저장하면 빈 상태로 덮어쓴다.
+   * 표를 갈아 끼울 때 다시 읽으면, 방금 비운 선택 위에 이전 표의 선택이 되살아난다.
+   */
+  const restored = useRef(false)
   useEffect(() => {
+    if (restored.current) return
+    restored.current = true
     let alive = true
     void loadWorkspace().then((file) => {
       if (!alive) return
@@ -166,7 +204,7 @@ export function Workspace() {
     return () => {
       alive = false
     }
-  }, [rowCount])
+  }, [])
 
   // 조건이 바뀔 때마다 저장한다. 남기는 것은 조건과 카메라뿐이다.
   useEffect(() => {
@@ -236,6 +274,37 @@ export function Workspace() {
     run({ kind: 'select', label: '저장한 작업 공간 비우기', next: () => new Map() })
   }, [])
 
+  /**
+   * 표를 갈아 끼울 때는 조건과 카메라를 같이 비운다. 이전 표의 올가미 선택이
+   * 그대로 남으면 남의 행 번호를 가리키고, 카메라는 좌표 범위가 달라 엉뚱한 곳을 본다.
+   */
+  const openTable = useCallback((table: LoadedTable, label: string) => {
+    setSource({ table, label })
+    setCamera(null)
+    setHovered(null)
+    run({ kind: 'select', label: `자산 열기 · ${label}`, next: () => new Map() })
+  }, [])
+
+  const openSample = useCallback(() => {
+    openTable(sampleLoadedTable(), '고객문의 샘플')
+  }, [openTable])
+
+  const openFile = useCallback(
+    async (blob: File) => {
+      try {
+        openTable(await readTableFile(blob), blob.name)
+      } catch (error) {
+        const message =
+          error instanceof UnsupportedFileError
+            ? error.message
+            : `'${blob.name}'을(를) 읽지 못했다.`
+        setNotice(message)
+        run({ kind: 'note', label: `파일 열기 실패 · ${blob.name}` })
+      }
+    },
+    [openTable],
+  )
+
   const clearAll = useCallback(() => {
     if (clauses.size === 0) return
     run({ kind: 'select', label: '선택 해제', next: () => new Map() })
@@ -276,21 +345,31 @@ export function Workspace() {
     rows[row] = 1
     run({
       kind: 'select',
-      label: `행 선택 · ${table.textOf(row)}`,
+      label: `행 선택 · ${model.rowLabel(row)}`,
       next: withClause(TABLE, { kind: 'rows', rows }),
     })
   }
 
-  function onCategories(values: readonly number[]) {
-    const added = values.filter((value) => !categories.includes(value))
-    const name = SAMPLE_CATEGORIES[added[0] ?? categories.find((v) => !values.includes(v)) ?? 0]
+  /**
+   * 분포 그래프는 자리 번호로 말하고 조건은 원본 코드로 적는다.
+   * "기타" 자리 하나가 값 여러 개를 덮기 때문에 그 사이를 여기서 편다.
+   */
+  function onCategories(slots: readonly number[]) {
+    const role = model.category
+    if (role === undefined || role === null) return
+    const added = slots.filter((slot) => !categorySlots.includes(slot))
+    const changed = added[0] ?? categorySlots.find((slot) => !slots.includes(slot)) ?? 0
+    const name = role.names[changed] ?? ''
+    const codes = slots.flatMap((slot) => role.codesOfSlot[slot] ?? [])
     run({
       kind: 'select',
       label:
-        values.length === 0 ? '범주 해제' : `범주 ${added.length > 0 ? '선택' : '해제'} · ${name}`,
+        slots.length === 0
+          ? `${role.column} 해제`
+          : `${role.column} ${added.length > 0 ? '선택' : '해제'} · ${name}`,
       next: withClause(
         BARS,
-        values.length === 0 ? null : { kind: 'category', column: 'category', values },
+        slots.length === 0 ? null : { kind: 'category', column: role.column, values: codes },
       ),
     })
   }
@@ -298,16 +377,18 @@ export function Workspace() {
   function onRange(next: { min: number; max: number } | null) {
     if (next === null) {
       if (clauses.has(HISTOGRAM)) {
-        run({ kind: 'select', label: '감성 구간 해제', next: withClause(HISTOGRAM, null) })
+        run({ kind: 'select', label: '구간 해제', next: withClause(HISTOGRAM, null) })
       }
       return
     }
+    const measure = model.measure
+    if (measure === null) return
     run({
       kind: 'select',
-      label: `감성 구간 · ${next.min.toFixed(2)} ~ ${next.max.toFixed(2)}`,
+      label: `${measure.column} 구간 · ${next.min.toFixed(2)} ~ ${next.max.toFixed(2)}`,
       next: withClause(HISTOGRAM, {
         kind: 'range',
-        column: 'sentiment',
+        column: measure.column,
         min: next.min,
         max: next.max,
       }),
@@ -342,29 +423,42 @@ export function Workspace() {
       { group: '작업 공간', label: '작업 공간 불러오기', run: () => picker.current?.click() },
       { group: '작업 공간', label: '저장한 작업 공간 비우기', run: forgetWorkspace },
     )
-    SAMPLE_CATEGORIES.forEach((name, index) => {
-      list.push({
-        group: '선택',
-        label: `범주만 보기 · ${name}`,
-        run: () =>
-          run({
-            kind: 'select',
-            label: `범주만 보기 · ${name}`,
-            next: withClause(BARS, { kind: 'category', column: 'category', values: [index] }),
-          }),
+    list.push({ group: '자산', label: '파일 열기', run: () => tablePicker.current?.click() })
+    if (model.assetId !== SAMPLE_ASSET) {
+      list.push({ group: '자산', label: '샘플로 돌아가기', run: openSample })
+    }
+    const role = model.category
+    if (role !== null) {
+      role.names.forEach((name, slot) => {
+        list.push({
+          group: '선택',
+          label: `${role.column}만 보기 · ${name}`,
+          run: () =>
+            run({
+              kind: 'select',
+              label: `${role.column}만 보기 · ${name}`,
+              next: withClause(BARS, {
+                kind: 'category',
+                column: role.column,
+                values: [...(role.codesOfSlot[slot] ?? [])],
+              }),
+            }),
+        })
       })
-    })
+    }
     return list
   }, [
     state,
     hasSelection,
     lasso,
     effect,
+    model,
     clearAll,
     toggleLasso,
     setEffectLevel,
     exportWorkspace,
     forgetWorkspace,
+    openSample,
   ])
 
   useEffect(() => {
@@ -383,15 +477,26 @@ export function Workspace() {
     return () => window.removeEventListener('keydown', onKey)
   }, [palette, clearAll, toggleLasso])
 
-  const hoveredText = hovered === null ? null : table.textOf(hovered)
-  const hoveredCategory = hovered === null ? 0 : (table.category[hovered] ?? 0)
+  const pointColorOf = useCallback(
+    (row: number) => {
+      const role = model.category
+      return role === null ? 0 : role.colorOfSlot(role.slotOf(row))
+    },
+    [model],
+  )
+
+  const hoveredText = hovered === null ? null : model.rowLabel(hovered)
+  const hoveredSlot =
+    hovered === null || model.category === null ? -1 : model.category.slotOf(hovered)
+  const hoveredColor = model.category === null ? 0 : model.category.colorOfSlot(hoveredSlot)
+  const hoveredName = hoveredSlot < 0 ? '' : (model.category?.names[hoveredSlot] ?? '')
 
   return (
     <main className="holo-workspace">
       <header className="holo-header">
         <h1>홀로그램 데이터 뷰어</h1>
         <p className="holo-caption">
-          샘플 문의 {count(rowCount)}건 · 선택 {count(everything.count)}건
+          {model.label} · {count(rowCount)}행 · 선택 {count(everything.count)}건
         </p>
         <div className="holo-controls">
           <button
@@ -430,16 +535,25 @@ export function Workspace() {
 
       <div className="holo-main">
         <div className="holo-stage-slot">
-          <PointCloudView
-            table={table}
-            selected={everything.mask}
-            effect={effect}
-            lasso={lasso}
-            onHover={setHovered}
-            onLasso={onLasso}
-            camera={camera}
-            onCameraRest={setCamera}
-          />
+          {model.position === null ? (
+            <div className="holo-stage-empty">
+              <p>{model.positionMissing}</p>
+              <p className="holo-caption">표와 분포 그래프는 그대로 쓸 수 있습니다.</p>
+            </div>
+          ) : (
+            <PointCloudView
+              rowCount={rowCount}
+              positions={model.position}
+              colorOf={pointColorOf}
+              selected={everything.mask}
+              effect={effect}
+              lasso={lasso}
+              onHover={setHovered}
+              onLasso={onLasso}
+              camera={camera}
+              onCameraRest={setCamera}
+            />
+          )}
           <p className="holo-readout">
             {notice !== null ? (
               <span className="holo-notice">{notice}</span>
@@ -449,9 +563,11 @@ export function Workspace() {
               </span>
             ) : (
               <>
-                <span className="holo-tag" style={{ color: `var(--holo-cat-${hoveredCategory})` }}>
-                  {SAMPLE_CATEGORIES[hoveredCategory] ?? '기타'}
-                </span>
+                {hoveredName === '' ? null : (
+                  <span className="holo-tag" style={{ color: `var(--holo-cat-${hoveredColor})` }}>
+                    {hoveredName}
+                  </span>
+                )}
                 {hoveredText}
               </>
             )}
@@ -459,11 +575,14 @@ export function Workspace() {
         </div>
 
         <aside className="holo-side">
+          <FileDropZone compact onLoaded={(next, name) => openTable(next, name)} />
           <DistributionView
-            table={table}
+            rowCount={rowCount}
+            category={model.category}
+            measure={model.measure}
             visibleForCategories={forBars.mask}
-            visibleForSentiment={forHistogram.mask}
-            categories={categories}
+            visibleForMeasure={forHistogram.mask}
+            categories={categorySlots}
             range={range}
             onCategories={onCategories}
             onRange={onRange}
@@ -474,7 +593,7 @@ export function Workspace() {
 
       <section className="holo-bottom">
         <TableView
-          table={table}
+          columns={model.columns}
           rows={tableRows}
           visibleCount={forTable.count}
           hovered={hovered}
@@ -483,6 +602,18 @@ export function Workspace() {
           onPick={onPickRow}
         />
       </section>
+
+      <input
+        ref={tablePicker}
+        type="file"
+        accept=".csv,.tsv,.txt,.json,.jsonl,.ndjson"
+        hidden
+        onChange={(event) => {
+          const blob = event.target.files?.[0]
+          event.target.value = ''
+          if (blob) void openFile(blob)
+        }}
+      />
 
       <input
         ref={picker}

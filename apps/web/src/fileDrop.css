@@ -72,3 +72,23 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* 좌표를 만들 수 없을 때 3D 자리에 놓는 안내. */
+.holo-stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--holo-text, #ece9f4);
+  word-break: keep-all;
+}
+
+.holo-stage-empty p {
+  margin: 0;
+  max-width: 40ch;
+  line-height: 1.7;
+}

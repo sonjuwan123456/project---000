@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { SAMPLE_CATEGORIES, type SampleTable } from '@holo/data'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ViewColumn } from '@holo/data'
 
 /**
  * 표 뷰 — 설계 문서 5장의 "필터" 반응을 맡는 뷰.
@@ -11,7 +11,8 @@ import { SAMPLE_CATEGORIES, type SampleTable } from '@holo/data'
  * 행 높이를 고정해 두면 스크롤 위치에서 몇 번째 행인지 바로 계산할 수 있다.
  */
 export type TableViewProps = {
-  table: SampleTable
+  /** 표에 그릴 컬럼. 순서가 그대로 칸 순서다. */
+  columns: readonly ViewColumn[]
   /** 코디네이터가 준 보이는 행 번호. null이면 전체 행이 순서대로 보인다. */
   rows: Int32Array | null
   /** 보이는 행 수. rows가 null이면 전체 행 수. */
@@ -28,16 +29,30 @@ const ROW_HEIGHT = 34
 /** 위아래로 더 만들어 두는 행. 빠르게 스크롤할 때 빈 칸이 스치는 것을 막는다. */
 const OVERSCAN = 6
 
-const dateFormat = new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric' })
+/**
+ * 칸 너비. 글자 컬럼은 남는 자리를 나눠 갖고, 나머지는 내용에 맞춘 고정 폭이다.
+ * 컬럼 수가 파일마다 다르니 CSS에 적어 둘 수 없다.
+ */
+function gridTemplate(columns: readonly ViewColumn[]): string {
+  if (columns.length === 0) return 'minmax(0, 1fr)'
+  const widths: string[] = columns.map((column) => {
+    if (column.kind === 'text') return 'minmax(0, 2fr)'
+    if (column.kind === 'tag') return 'minmax(4.5em, 0.8fr)'
+    return 'minmax(4em, 0.6fr)'
+  })
+  // 글자 컬럼이 하나도 없으면 전부 고정 폭이라 표가 왼쪽에 몰린다.
+  if (!columns.some((column) => column.kind === 'text')) widths.push('minmax(0, 1fr)')
+  return widths.join(' ')
+}
 
-function sentimentLabel(value: number): string {
-  if (value <= -0.3) return '부정'
-  if (value >= 0.3) return '긍정'
-  return '중립'
+function cellClass(kind: ViewColumn['kind']): string {
+  if (kind === 'text') return 'holo-cell-text'
+  if (kind === 'tag') return 'holo-cell-tag'
+  return 'holo-cell-num'
 }
 
 export function TableView(props: TableViewProps) {
-  const { table, rows, visibleCount, hovered, onHover, picked, onPick } = props
+  const { columns, rows, visibleCount, hovered, onHover, picked, onPick } = props
   const scroller = useRef<HTMLDivElement>(null)
   const [first, setFirst] = useState(0)
   const [window_, setWindow] = useState(24)
@@ -58,6 +73,7 @@ export function TableView(props: TableViewProps) {
     return () => observer.disconnect()
   }, [])
 
+  const template = useMemo(() => gridTemplate(columns), [columns])
   const start = Math.max(0, first - OVERSCAN)
   const end = Math.min(visibleCount, start + window_)
   const slice: number[] = []
@@ -67,12 +83,10 @@ export function TableView(props: TableViewProps) {
 
   return (
     <div className="holo-table">
-      <div className="holo-table-head">
-        <span>원문</span>
-        <span>범주</span>
-        <span>감성</span>
-        <span>글자</span>
-        <span>날짜</span>
+      <div className="holo-table-head" style={{ gridTemplateColumns: template }}>
+        {columns.map((column) => (
+          <span key={column.name}>{column.name}</span>
+        ))}
       </div>
       <div
         className="holo-table-body"
@@ -90,20 +104,23 @@ export function TableView(props: TableViewProps) {
                   (row === hovered ? ' is-hovered' : '') +
                   (row === picked ? ' is-picked' : '')
                 }
-                style={{ height: ROW_HEIGHT }}
+                style={{ height: ROW_HEIGHT, gridTemplateColumns: template }}
                 onPointerEnter={() => onHover(row)}
                 onClick={() => onPick(row)}
               >
-                <span className="holo-cell-text">{table.textOf(row)}</span>
-                <span
-                  className="holo-cell-tag"
-                  style={{ color: `var(--holo-cat-${table.category[row] ?? 0})` }}
-                >
-                  {SAMPLE_CATEGORIES[table.category[row] ?? 0] ?? '기타'}
-                </span>
-                <span className="holo-cell-num">{sentimentLabel(table.sentiment[row] ?? 0)}</span>
-                <span className="holo-cell-num">{table.charCount[row] ?? 0}</span>
-                <span className="holo-cell-num">{dateFormat.format(table.dateOf(row))}</span>
+                {columns.map((column) => (
+                  <span
+                    key={column.name}
+                    className={cellClass(column.kind)}
+                    style={
+                      column.colorOf === null
+                        ? undefined
+                        : { color: `var(--holo-cat-${column.colorOf(row)})` }
+                    }
+                  >
+                    {column.textOf(row)}
+                  </span>
+                ))}
               </div>
             ))}
           </div>

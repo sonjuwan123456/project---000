@@ -10,7 +10,7 @@ import {
   type ShaderMaterial,
 } from 'three'
 import { categoryPalette, holoColors, type RowMask, type StoredCamera } from '@holo/core'
-import type { SampleTable } from '@holo/data'
+import type { Positions } from '@holo/data'
 import {
   glowPass,
   maxPixelRatio,
@@ -27,7 +27,11 @@ import {
  * 만들지 않고 버퍼 하나에 담아 한 번에 그린다.
  */
 export type PointCloudViewProps = {
-  table: SampleTable
+  rowCount: number
+  /** 그릴 좌표. 좌표가 없는 행은 그리지 않는다. */
+  positions: Positions
+  /** 행 → 팔레트 자리. */
+  colorOf: (row: number) => number
   /** 코디네이터가 합친 선택. null이면 전체가 선택된 것으로 본다. */
   selected: RowMask | null
   effect: EffectLevel
@@ -49,8 +53,27 @@ const DEFAULT_CAMERA: readonly [number, number, number] = [11, 7, 15]
 /** drei의 컨트롤 인스턴스 타입. 직접 적으면 ref 타입이 맞지 않는다. */
 type OrbitControlsHandle = ComponentRef<typeof OrbitControls>
 
-function buildGeometry(table: SampleTable): BufferGeometry {
-  const count = table.rowCount
+/**
+ * 그린 점과 원래 행 번호를 함께 들고 있는 것.
+ *
+ * 좌표가 없는 행(벡터 길이가 어긋났거나 숫자 칸이 비었다)은 버퍼에 넣지 않는다.
+ * 원점에 몰아 두면 없는 자료가 군집처럼 보이기 때문이다. 대신 버퍼 자리와 행 번호가
+ * 어긋나므로 `rows`로 되돌린다.
+ */
+type Cloud = {
+  readonly geometry: BufferGeometry
+  /** 버퍼 자리 → 원래 행 번호. */
+  readonly rows: Int32Array
+}
+
+function buildCloud(rowCount: number, source: Positions, colorOf: (row: number) => number): Cloud {
+  const drawn: number[] = []
+  for (let row = 0; row < rowCount; row += 1) {
+    if (source.missing[row] !== 1) drawn.push(row)
+  }
+  const rows = Int32Array.from(drawn)
+  const count = rows.length
+
   const positions = new Float32Array(count * 3)
   const colors = new Float32Array(count * 3)
   const selected = new Float32Array(count).fill(1)
@@ -58,18 +81,19 @@ function buildGeometry(table: SampleTable): BufferGeometry {
   const palette = categoryPalette()
   const paletteLength = palette.length / 3
 
-  for (let row = 0; row < count; row += 1) {
-    positions[row * 3] = table.x[row] ?? 0
-    positions[row * 3 + 1] = table.y[row] ?? 0
-    positions[row * 3 + 2] = table.z[row] ?? 0
+  for (let index = 0; index < count; index += 1) {
+    const row = rows[index] ?? 0
+    positions[index * 3] = source.x[row] ?? 0
+    positions[index * 3 + 1] = source.y[row] ?? 0
+    positions[index * 3 + 2] = source.z[row] ?? 0
 
-    const slot = ((table.category[row] ?? 0) % paletteLength) * 3
-    colors[row * 3] = palette[slot] ?? 1
-    colors[row * 3 + 1] = palette[slot + 1] ?? 1
-    colors[row * 3 + 2] = palette[slot + 2] ?? 1
+    const slot = (((colorOf(row) % paletteLength) + paletteLength) % paletteLength) * 3
+    colors[index * 3] = palette[slot] ?? 1
+    colors[index * 3 + 1] = palette[slot + 1] ?? 1
+    colors[index * 3 + 2] = palette[slot + 2] ?? 1
 
     // 등장 연출을 점마다 조금씩 어긋나게 한다. 난수를 쓰면 다시 그릴 때마다 달라진다.
-    seeds[row] = (row % 97) / 97
+    seeds[index] = (row % 97) / 97
   }
 
   const geometry = new BufferGeometry()
@@ -78,7 +102,7 @@ function buildGeometry(table: SampleTable): BufferGeometry {
   geometry.setAttribute('aSelected', new BufferAttribute(selected, 1))
   geometry.setAttribute('aSeed', new BufferAttribute(seeds, 1))
   geometry.computeBoundingSphere()
-  return geometry
+  return { geometry, rows }
 }
 
 function CameraBridge({ handle }: { handle: RefObject<CameraHandle> }) {
@@ -90,13 +114,19 @@ function CameraBridge({ handle }: { handle: RefObject<CameraHandle> }) {
 }
 
 function PointCloud(props: {
-  table: SampleTable
+  rowCount: number
+  positions: Positions
+  colorOf: (row: number) => number
   selected: RowMask | null
   effect: EffectLevel
   onHover: (row: number | null) => void
 }) {
-  const { table, selected, effect, onHover } = props
-  const geometry = useMemo(() => buildGeometry(table), [table])
+  const { rowCount, positions, colorOf, selected, effect, onHover } = props
+  const cloud = useMemo(
+    () => buildCloud(rowCount, positions, colorOf),
+    [rowCount, positions, colorOf],
+  )
+  const { geometry, rows: drawnRows } = cloud
   const core = useRef<ShaderMaterial>(null)
   const glow = useRef<ShaderMaterial>(null)
   const reveal = useRef(0)
@@ -110,9 +140,12 @@ function PointCloud(props: {
     const attribute = geometry.getAttribute('aSelected') as BufferAttribute
     const values = attribute.array as Float32Array
     if (selected === null) values.fill(1)
-    else for (let row = 0; row < values.length; row += 1) values[row] = selected[row] === 1 ? 1 : 0
+    else
+      for (let index = 0; index < values.length; index += 1) {
+        values[index] = selected[drawnRows[index] ?? 0] === 1 ? 1 : 0
+      }
     attribute.needsUpdate = true
-  }, [geometry, selected])
+  }, [geometry, selected, drawnRows])
 
   // 등장 연출은 한 번만 재생한다. 움직임을 줄인 환경에서는 건너뛴다.
   useEffect(() => {
@@ -155,7 +188,8 @@ function PointCloud(props: {
 
   function handleMove(event: ThreeEvent<PointerEvent>) {
     event.stopPropagation()
-    const row = event.index ?? null
+    const index = event.index ?? null
+    const row = index === null ? null : (drawnRows[index] ?? null)
     if (row === hovered.current) return
     hovered.current = row
     onHover(row)
@@ -203,17 +237,20 @@ function PointCloud(props: {
 
 /** 화면에 그린 다각형 안에 든 점을 고른다. 카메라가 보고 있는 그대로 판정한다. */
 function pickInsidePolygon(
-  table: SampleTable,
+  rowCount: number,
+  source: Positions,
   polygon: readonly (readonly [number, number])[],
   handle: NonNullable<CameraHandle>,
 ): { rows: RowMask; count: number } {
   const { camera, width, height } = handle
-  const rows = new Uint8Array(table.rowCount)
+  const rows = new Uint8Array(rowCount)
   const point = new Vector3()
   let count = 0
 
-  for (let row = 0; row < table.rowCount; row += 1) {
-    point.set(table.x[row] ?? 0, table.y[row] ?? 0, table.z[row] ?? 0).project(camera)
+  for (let row = 0; row < rowCount; row += 1) {
+    // 좌표가 없는 행은 화면에 없으니 올가미로도 고를 수 없다.
+    if (source.missing[row] === 1) continue
+    point.set(source.x[row] ?? 0, source.y[row] ?? 0, source.z[row] ?? 0).project(camera)
     if (point.z > 1) continue // 카메라 뒤나 far 평면 밖
     const px = (point.x * 0.5 + 0.5) * width
     const py = (1 - (point.y * 0.5 + 0.5)) * height
@@ -233,11 +270,12 @@ function pickInsidePolygon(
 }
 
 function LassoLayer(props: {
-  table: SampleTable
+  rowCount: number
+  positions: Positions
   handle: RefObject<CameraHandle>
   onLasso: (rows: RowMask | null, count: number) => void
 }) {
-  const { table, handle, onLasso } = props
+  const { rowCount, positions, handle, onLasso } = props
   const path = useRef<[number, number][]>([])
   const shape = useRef<SVGPolygonElement>(null)
 
@@ -274,7 +312,7 @@ function LassoLayer(props: {
           onLasso(null, 0)
           return
         }
-        const picked = pickInsidePolygon(table, polygon, handle.current)
+        const picked = pickInsidePolygon(rowCount, positions, polygon, handle.current)
         if (picked.count === 0) onLasso(null, 0)
         else onLasso(picked.rows, picked.count)
       }}
@@ -287,7 +325,8 @@ function LassoLayer(props: {
 }
 
 export function PointCloudView(props: PointCloudViewProps) {
-  const { table, selected, effect, lasso, onHover, onLasso, camera, onCameraRest } = props
+  const { rowCount, positions, colorOf, selected, effect, lasso } = props
+  const { onHover, onLasso, camera, onCameraRest } = props
   const handle = useRef<CameraHandle>(null)
   const controls = useRef<OrbitControlsHandle>(null)
   const start = camera?.position ?? DEFAULT_CAMERA
@@ -313,7 +352,14 @@ export function PointCloudView(props: PointCloudViewProps) {
       >
         <color attach="background" args={[holoColors.bg]} />
         <CameraBridge handle={handle} />
-        <PointCloud table={table} selected={selected} effect={effect} onHover={onHover} />
+        <PointCloud
+          rowCount={rowCount}
+          positions={positions}
+          colorOf={colorOf}
+          selected={selected}
+          effect={effect}
+          onHover={onHover}
+        />
         <Grid
           args={[60, 60]}
           cellColor={holoColors.line}
@@ -338,7 +384,9 @@ export function PointCloudView(props: PointCloudViewProps) {
           }}
         />
       </Canvas>
-      {lasso ? <LassoLayer table={table} handle={handle} onLasso={onLasso} /> : null}
+      {lasso ? (
+        <LassoLayer rowCount={rowCount} positions={positions} handle={handle} onLasso={onLasso} />
+      ) : null}
     </div>
   )
 }

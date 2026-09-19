@@ -179,3 +179,34 @@ export function createSampleTable(rowCount = 10_000, seed = 20260918): SampleTab
     },
   }
 }
+
+/** CSV 한 칸으로 만든다. 따옴표와 쉼표가 든 값만 감싼다. */
+function cell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value
+}
+
+/**
+ * 샘플 표를 CSV 글자로 낸다.
+ *
+ * 개발용 화면도 파일을 거쳐 들어오게 하려는 것이다. 샘플만 다른 길로 들어오면
+ * 로더가 깨져도 화면은 멀쩡해 보인다.
+ */
+export function sampleCsv(rowCount = 10_000, seed = 20260918): string {
+  const table = createSampleTable(rowCount, seed)
+  const lines: string[] = ['원문,범주,감성,글자수,접수일,x,y,z']
+  for (let row = 0; row < rowCount; row += 1) {
+    lines.push(
+      [
+        cell(table.textOf(row)),
+        cell(SAMPLE_CATEGORIES[table.category[row] ?? 0] ?? '기타'),
+        (table.sentiment[row] ?? 0).toFixed(3),
+        String(table.charCount[row] ?? 0),
+        table.dateOf(row).toISOString().split('T')[0] ?? '',
+        (table.x[row] ?? 0).toFixed(3),
+        (table.y[row] ?? 0).toFixed(3),
+        (table.z[row] ?? 0).toFixed(3),
+      ].join(','),
+    )
+  }
+  return lines.join('\n')
+}
