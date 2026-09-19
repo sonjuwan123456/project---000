@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildTable } from './loadTable'
 import { loadDelimitedText } from './loadTable'
-import { toViewModel } from './viewModel'
+import { pcaTo3D } from './pca'
+import { toViewModel, vectorToReduce } from './viewModel'
 
 function csv(lines: readonly string[]) {
   return toViewModel(loadDelimitedText(lines.join('\n')), '시험.csv')
@@ -25,13 +26,38 @@ describe('좌표 고르기', () => {
     expect(model.positionMissing).toContain('세 개')
   })
 
-  it('임베딩이 있으면 차원 축소가 필요하다고 말한다', () => {
+  it('숫자 컬럼이 없고 임베딩만 있으면 주성분으로 줄여서 좌표를 만든다', () => {
     const lines = ['emb_0,emb_1,emb_2,emb_3']
     for (let row = 0; row < 20; row += 1) lines.push(`${row},${row + 1},${row + 2},${row + 3}`)
     const model = csv(lines)
-    // 넓은 형태가 벡터로 묶여서 숫자 컬럼이 남지 않는다.
-    expect(model.position).toBeNull()
-    expect(model.positionMissing).toContain('차원 축소')
+    // 넓은 형태가 벡터로 묶여서 숫자 컬럼이 남지 않는다. 그때만 줄인다.
+    expect(model.position?.axes).toEqual(['PC1', 'PC2', 'PC3'])
+    expect(model.position?.derivedFrom).toContain('주성분')
+    expect(model.positionMissing).toBeNull()
+  })
+
+  it('세 칸짜리 벡터는 줄이지 않고 그대로 축으로 쓴다', () => {
+    /*
+     * 3차원을 주성분 셋으로 줄이는 것은 돌려 놓기일 뿐이다. 얻는 것 없이 축
+     * 이름만 PC1로 바뀌고 설명력이 붙어 뭔가를 잃은 것처럼 읽힌다.
+     */
+    const lines = ['emb_0,emb_1,emb_2']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row},${row * 2},${row * 5}`)
+    const model = csv(lines)
+    expect(model.position?.axes).toEqual(['emb_0', 'emb_1', 'emb_2'])
+    expect(model.position?.derivedFrom).toBeNull()
+    expect(model.positionPending).toBe(false)
+  })
+
+  it('숫자 컬럼이 셋 있으면 임베딩이 있어도 그 컬럼을 쓴다', () => {
+    // 사용자가 아는 축이 이름 없는 주성분보다 읽기 쉽다.
+    const lines = ['매출,방문,체류,emb_0,emb_1,emb_2']
+    for (let row = 0; row < 20; row += 1) {
+      lines.push(`${row * 3},${row * 7},${row * 2},${row},${row + 1},${row + 2}`)
+    }
+    const model = csv(lines)
+    expect(model.position?.derivedFrom).toBeNull()
+    expect(model.position?.axes).toContain('매출')
   })
 
   it('값이 하나뿐인 축은 좌표로 쓰지 않는다', () => {
@@ -115,6 +141,64 @@ describe('표에 그릴 칸', () => {
       'B2,결제가 두 번 청구되었습니다',
     ])
     expect(model.rowLabel(0)).toContain('주문한')
+  })
+})
+
+describe('줄이는 계산을 워커에 맡길 때', () => {
+  function embeddingTable() {
+    const lines = ['emb_0,emb_1,emb_2,emb_3']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row},${row + 1},${row + 2},${row + 3}`)
+    return loadDelimitedText(lines.join('\n'))
+  }
+
+  it('줄여야 할 임베딩을 짚어 준다', () => {
+    expect(vectorToReduce(embeddingTable())?.dimension).toBe(4)
+  })
+
+  it('세 칸 이하짜리 벡터는 워커로 보내지 않는다', () => {
+    const lines = ['emb_0,emb_1,emb_2']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row},${row * 2},${row * 5}`)
+    expect(vectorToReduce(loadDelimitedText(lines.join('\n')))).toBeNull()
+  })
+
+  it('숫자 컬럼만으로 좌표가 서면 줄일 것이 없다', () => {
+    const lines = ['매출,방문,체류']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row * 3},${row * 7},${row * 2}`)
+    expect(vectorToReduce(loadDelimitedText(lines.join('\n')))).toBeNull()
+  })
+
+  it('기다리는 중에는 좌표가 없고 실패가 아니라고 말한다', () => {
+    const model = toViewModel(embeddingTable(), '시험.csv', { awaitingReduction: true })
+    expect(model.position).toBeNull()
+    expect(model.positionPending).toBe(true)
+    expect(model.positionMissing).toContain('줄이고 있습니다')
+  })
+
+  it('워커가 준 결과를 그대로 좌표로 쓴다', () => {
+    const table = embeddingTable()
+    const vector = vectorToReduce(table)
+    expect(vector).not.toBeNull()
+    if (vector === null) return
+    const model = toViewModel(table, '시험.csv', {
+      awaitingReduction: true,
+      reduced: pcaTo3D(vector),
+    })
+    expect(model.positionPending).toBe(false)
+    expect(model.position?.axes).toEqual(['PC1', 'PC2', 'PC3'])
+    // 워커를 거치지 않고 그 자리에서 줄인 것과 좌표가 같아야 한다.
+    expect([...(model.position?.x ?? [])]).toEqual([
+      ...(toViewModel(table, '시험.csv').position?.x ?? []),
+    ])
+  })
+
+  it('숫자 컬럼으로 좌표가 서면 기다리라고 해도 기다리지 않는다', () => {
+    const lines = ['매출,방문,체류']
+    for (let row = 0; row < 20; row += 1) lines.push(`${row * 3},${row * 7},${row * 2}`)
+    const model = toViewModel(loadDelimitedText(lines.join('\n')), '시험.csv', {
+      awaitingReduction: true,
+    })
+    expect(model.positionPending).toBe(false)
+    expect(model.position).not.toBeNull()
   })
 })
 

@@ -91,6 +91,19 @@ export type LoadedTable = {
   readonly lookup: ColumnLookup
 }
 
+/**
+ * 조회 함수를 뺀 표. 워커와 주고받는 모양이다.
+ *
+ * `lookup`만 함수고 나머지는 전부 값(TypedArray, Map, Set)이라 구조화 복제를 그대로
+ * 통과한다. 워커는 이 모양으로 돌려주고 받는 쪽이 `attachLookup`으로 함수를 다시 단다.
+ */
+export type LoadedTableData = Omit<LoadedTable, 'lookup'>
+
+/** 워커에서 온 표에 조회 함수를 다시 단다. */
+export function attachLookup(data: LoadedTableData): LoadedTable {
+  return { ...data, lookup: lookupFor(data.columns, data.vectors) }
+}
+
 function buildNumberColumn(
   name: string,
   raw: readonly (string | null)[],
