@@ -1,9 +1,33 @@
 /**
  * 연결층·데이터층. 로더 레지스트리, Arrow 데이터층, 계산 워커.
  *
- * M0에서는 패키지 경계와 의존 방향만 잡아 둔다.
- * 실제 구현은 M1(로더)과 M2(파생 계산) 에서 채운다.
+ * M1에서 표 데이터 자산을 불러오는 길이 들어왔다. 파생 계산(M2)은 아직이다.
  */
 export const PACKAGE_NAME = '@holo/data'
 
 export { SAMPLE_CATEGORIES, createSampleTable, type SampleTable } from './sampleTable'
+
+export { DEFAULT_INFERENCE, isBlank, parseDatetime, parseNumber, profileColumn } from './columnType'
+export type { ColumnProfile, InferenceOptions, ScalarColumnKind } from './columnType'
+
+export { detectDelimiter, parseDelimitedText } from './delimitedText'
+export type { DelimitedTable } from './delimitedText'
+
+export { detectStringVector } from './stringVectorGuard'
+export type { StringVectorFinding, StringVectorFlavor } from './stringVectorGuard'
+
+export { groupWideVectorColumns, vectorFromLists, vectorFromWideColumns } from './vectorColumn'
+export type { VectorColumn, WideVectorGroup } from './vectorColumn'
+
+export { buildTable, loadDelimitedText } from './loadTable'
+export type {
+  BuildOptions,
+  LoadDelimitedOptions,
+  LoadNotice,
+  LoadedCategoryColumn,
+  LoadedColumn,
+  LoadedDatetimeColumn,
+  LoadedNumberColumn,
+  LoadedTable,
+  LoadedTextColumn,
+} from './loadTable'
