@@ -10,7 +10,7 @@ import {
   type ShaderMaterial,
 } from 'three'
 import { categoryPalette, holoColors, type RowMask, type StoredCamera } from '@holo/core'
-import type { Positions } from '@holo/data'
+import type { ClusterAnchor, Positions } from '@holo/data'
 import {
   glowPass,
   maxPixelRatio,
@@ -18,6 +18,7 @@ import {
   pointsVertexShader,
   type EffectLevel,
 } from '@holo/holo-fx'
+import { ClusterLabels } from './ClusterLabels'
 
 /**
  * 3D 점 뷰 — 설계 문서 5장의 "강조" 반응을 맡는 뷰.
@@ -39,6 +40,8 @@ export type PointCloudViewProps = {
   lasso: boolean
   onHover: (row: number | null) => void
   onLasso: (rows: RowMask | null, count: number) => void
+  /** 군집 라벨을 얹을 자리. 비어 있으면 라벨을 그리지 않는다. */
+  anchors?: readonly ClusterAnchor[]
   /** 되살릴 카메라. 첫 프레임에만 쓴다. */
   camera: StoredCamera | null
   /** 카메라를 놓은 순간의 위치. 드래그하는 동안에는 부르지 않는다. */
@@ -327,6 +330,7 @@ function LassoLayer(props: {
 export function PointCloudView(props: PointCloudViewProps) {
   const { rowCount, positions, colorOf, selected, effect, lasso } = props
   const { onHover, onLasso, camera, onCameraRest } = props
+  const anchors = props.anchors ?? []
   const handle = useRef<CameraHandle>(null)
   const controls = useRef<OrbitControlsHandle>(null)
   const start = camera?.position ?? DEFAULT_CAMERA
@@ -384,6 +388,7 @@ export function PointCloudView(props: PointCloudViewProps) {
           }}
         />
       </Canvas>
+      {anchors.length > 0 ? <ClusterLabels anchors={anchors} view={handle} /> : null}
       {lasso ? (
         <LassoLayer rowCount={rowCount} positions={positions} handle={handle} onLasso={onLasso} />
       ) : null}

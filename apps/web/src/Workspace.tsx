@@ -19,6 +19,7 @@ import {
 } from '@holo/core'
 import {
   UnsupportedFileError,
+  anchorsOf,
   loadDelimitedText,
   sampleCsv,
   startPca,
@@ -238,6 +239,15 @@ export function Workspace() {
   )
 
   const tableRows = useMemo(() => maskToRowIndices(forTable), [forTable])
+
+  // 군집 라벨 자리. 표가 바뀔 때만 다시 센다.
+  const anchors = useMemo(
+    () =>
+      model.position === null || model.category === null
+        ? []
+        : anchorsOf(model.position, model.category),
+    [model],
+  )
 
   const selectedCodes = categoriesOf(clauses)
   /** 조건은 원본 코드로 적혀 있고 그래프는 자리 번호로 그린다. 자리마다 대표 코드로 맞춰 본다. */
@@ -656,6 +666,7 @@ export function Workspace() {
             <PointCloudView
               rowCount={rowCount}
               positions={model.position}
+              anchors={anchors}
               colorOf={pointColorOf}
               selected={everything.mask}
               effect={effect}

@@ -58,6 +58,9 @@ export type {
   ViewModelOptions,
 } from './viewModel'
 
+export { anchorsOf } from './clusterAnchors'
+export type { ClusterAnchor } from './clusterAnchors'
+
 export { attachLookup, buildTable, loadDelimitedText } from './loadTable'
 export type {
   BuildOptions,

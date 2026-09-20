@@ -443,3 +443,45 @@
 .holo-notice {
   color: var(--holo-cat-4);
 }
+
+/* 군집 라벨 */
+
+.holo-labels {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.holo-cluster-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--holo-line);
+  border-radius: 999px;
+  /* 라벨은 자기 군집 위에 앉는다. 거기가 가장 밝아서 배경이 옅으면 범주 색 글자가 묻힌다. */
+  background: color-mix(in srgb, var(--holo-bg) 92%, transparent);
+  backdrop-filter: blur(2px);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+
+.holo-cluster-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holo-cluster-label {
+    transition: none;
+  }
+}

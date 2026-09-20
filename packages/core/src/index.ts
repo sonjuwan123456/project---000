@@ -24,6 +24,9 @@ export type {
   SelectionClauses,
   SelectionSource,
 } from './selection'
+export { layoutLabels } from './labelLayout'
+export type { LabelBox, LabelLayoutOptions, PlacedLabel } from './labelLayout'
+
 export {
   WORKSPACE_FORMAT_VERSION,
   fromWorkspaceFile,
