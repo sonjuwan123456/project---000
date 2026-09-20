@@ -1,4 +1,5 @@
 export { clamp, damp, lerp } from './math'
+export type { CameraDrive } from './camera'
 export { applyCommand, canUndo, createWorkspaceState } from './commands'
 export type { Command, HistoryEntry, LogEntry, WorkspaceState } from './commands'
 export { createLiveStore } from './live'

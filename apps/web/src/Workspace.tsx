@@ -13,6 +13,7 @@ import {
   type RowMask,
   type SelectionClause,
   type SelectionClauses,
+  type CameraDrive,
   type SelectionSource,
   type StoredCamera,
   type WorkspaceState,
@@ -32,6 +33,8 @@ import {
   type ViewModel,
 } from '@holo/data'
 import type { EffectLevel } from '@holo/holo-fx'
+import type { HandTrackingStatus } from '@holo/input'
+import { HandGestures } from './HandGestures'
 import {
   ActivityLog,
   CommandPalette,
@@ -69,6 +72,14 @@ const POINTS: SelectionSource = 'points'
 const TABLE: SelectionSource = 'table'
 const BARS: SelectionSource = 'charts:category'
 const HISTOGRAM: SelectionSource = 'charts:sentiment'
+
+/** 손 제스처 단추에 띄울 말. 실패하면 다시 누를 수 있다는 것이 보여야 한다. */
+const HAND_LABELS: Record<HandTrackingStatus, string> = {
+  off: '꺼짐',
+  loading: '켜는 중…',
+  on: '켜짐',
+  error: '다시 시도',
+}
 
 const EFFECT_LABELS: ReadonlyArray<{ level: EffectLevel; label: string }> = [
   { level: 'high', label: '높게' },
@@ -200,6 +211,13 @@ export function Workspace() {
   /** 저장된 작업 공간을 읽어 보기 전에는 아무것도 그리지 않는다. */
   const [ready, setReady] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [hand, setHand] = useState<HandTrackingStatus>('off')
+  /** 사용자가 켜 두려는 뜻. 실패해서 꺼졌을 때와 "켜짐"을 갈라 두어야 한다. */
+  const [handOn, setHandOn] = useState(false)
+  const [handNotice, setHandNotice] = useState<string | null>(null)
+  const [handSession, setHandSession] = useState(0)
+  /** 3D 뷰가 채워 주는 카메라 손잡이. 손 제스처가 이것으로 카메라를 움직인다. */
+  const drive = useRef<CameraDrive | null>(null)
   const picker = useRef<HTMLInputElement>(null)
   const tablePicker = useRef<HTMLInputElement>(null)
 
@@ -595,6 +613,26 @@ export function Workspace() {
     return () => window.removeEventListener('keydown', onKey)
   }, [palette, clearAll, toggleLasso])
 
+  const toggleHand = useCallback(() => {
+    setHandNotice(null)
+    if (handOn) {
+      setHandOn(false)
+      setHand('off')
+      return
+    }
+    // 같은 상태로 다시 켜는 것이라 번호를 올려야 카메라를 다시 잡는다.
+    setHandSession((n) => n + 1)
+    setHandOn(true)
+    setHand('loading')
+  }, [handOn])
+
+  const onHandStatus = useCallback((status: HandTrackingStatus, message: string | null) => {
+    setHand(status)
+    setHandNotice(message)
+    // 실패했으면 켜 두지 않는다. 손 커서만 떠 있고 아무것도 안 되는 상태가 남는다.
+    if (status === 'error') setHandOn(false)
+  }, [])
+
   const pointColorOf = useCallback(
     (row: number) => {
       const role = model.category
@@ -645,10 +683,18 @@ export function Workspace() {
           <button type="button" className="holo-chip" onClick={clearAll} disabled={!hasSelection}>
             선택 해제
           </button>
+          <button
+            type="button"
+            className={'holo-chip' + (hand === 'on' ? ' is-on' : '')}
+            onClick={toggleHand}
+          >
+            손 제스처 {HAND_LABELS[hand]}
+          </button>
           <button type="button" className="holo-chip" onClick={() => setPalette(true)}>
             명령 Ctrl+K
           </button>
         </div>
+        {handNotice === null ? null : <p className="holo-notice">{handNotice}</p>}
       </header>
 
       <div className="holo-main">
@@ -675,6 +721,7 @@ export function Workspace() {
               onLasso={onLasso}
               camera={camera}
               onCameraRest={setCamera}
+              drive={drive}
             />
           )}
           <p className="holo-readout">
@@ -753,6 +800,8 @@ export function Workspace() {
           if (blob) void importWorkspace(blob)
         }}
       />
+
+      <HandGestures enabled={handOn} session={handSession} drive={drive} onStatus={onHandStatus} />
 
       {palette ? <CommandPalette commands={commands} onClose={() => setPalette(false)} /> : null}
     </main>

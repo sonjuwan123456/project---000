@@ -8,6 +8,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@holo/core": "workspace:*"
+    "@holo/core": "workspace:*",
+    "@mediapipe/tasks-vision": "0.10.35",
+    "react": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0"
   }
 }
