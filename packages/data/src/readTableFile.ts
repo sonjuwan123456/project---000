@@ -7,24 +7,13 @@
  */
 
 import { assetIdOfFile, type FileIdentity } from './assetId'
+import { extensionOf, plannedMessage, supportedLabels } from './formats'
 import { buildTable, type BuildOptions, type LoadNotice, type LoadedTable } from './loadTable'
 import { loadDelimitedText } from './loadTable'
+import { UnsupportedFileError } from './unsupported'
 import { vectorFromLists, type VectorColumn } from './vectorColumn'
 
-export class UnsupportedFileError extends Error {
-  readonly fileName: string
-
-  constructor(fileName: string, message: string) {
-    super(message)
-    this.name = 'UnsupportedFileError'
-    this.fileName = fileName
-  }
-}
-
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf('.')
-  return dot === -1 ? '' : name.slice(dot + 1).toLowerCase()
-}
+export { UnsupportedFileError }
 
 /** JSON 한 덩어리에서 행 배열을 꺼낸다. 흔한 감싼 모양 두어 개까지만 받는다. */
 function rowsOfJson(parsed: unknown): Record<string, unknown>[] {
@@ -140,13 +129,6 @@ export function loadJson(text: string, options: BuildOptions = {}): LoadedTable 
   return loadRecords(records, options)
 }
 
-/** 아직 못 읽는 형식. 추측해서 열지 않고 무엇이 필요한지 말한다. */
-const PLANNED: Readonly<Record<string, string>> = {
-  xlsx: 'XLSX는 아직 읽지 못합니다. CSV로 내보내 주세요.',
-  xls: 'XLS는 아직 읽지 못합니다. CSV로 내보내 주세요.',
-  parquet: 'Parquet은 아직 읽지 못합니다. CSV로 내보내거나 조금 더 기다려 주세요.',
-}
-
 /** 브라우저의 File을 그대로 받는다. 텍스트를 읽는 일만 밖에서 시킨다. */
 export type ReadableFile = FileIdentity & {
   text(): Promise<string>
@@ -157,8 +139,9 @@ export async function readTableFile(
   options: BuildOptions = {},
 ): Promise<LoadedTable> {
   const extension = extensionOf(file.name)
-  const planned = PLANNED[extension]
-  if (planned !== undefined) throw new UnsupportedFileError(file.name, planned)
+  // 아직 못 읽는 형식은 추측해서 열지 않고 무엇이 필요한지 말한다(형식 표가 문구를 쥔다).
+  const planned = plannedMessage(file.name)
+  if (planned !== null) throw new UnsupportedFileError(file.name, planned)
 
   // 파일에서 뽑은 id를 아래로 내려 보낸다. 같은 파일을 다시 열면 같은 값이 나온다.
   const withId: BuildOptions = { ...options, assetId: assetIdOfFile(file) }
@@ -196,6 +179,6 @@ export async function readTableFile(
 
   throw new UnsupportedFileError(
     file.name,
-    `.${extension} 파일은 표로 읽지 못합니다. CSV, TSV, JSON, JSON Lines를 받습니다.`,
+    `.${extension} 파일은 표로 읽지 못합니다. ${supportedLabels().join(', ')}을(를) 받습니다.`,
   )
 }

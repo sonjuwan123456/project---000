@@ -19,14 +19,19 @@ import {
   type WorkspaceState,
 } from '@holo/core'
 import {
+  FORMATS,
   UnsupportedFileError,
   anchorsOf,
+  kindOfFile,
   loadDelimitedText,
+  readModelFile,
   sampleCsv,
   startPca,
   startTableRead,
   toViewModel,
   vectorToReduce,
+  type Asset,
+  type LoadedModel,
   type LoadedTable,
   type PcaResult,
   type TableJob,
@@ -40,8 +45,10 @@ import {
   CommandPalette,
   DistributionView,
   FileDropZone,
+  ModelView,
   PointCloudView,
   TableView,
+  type ModelDisplayMode,
   type PaletteCommand,
 } from '@holo/views'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './workspaceStore'
@@ -80,6 +87,17 @@ const HAND_LABELS: Record<HandTrackingStatus, string> = {
   on: '켜짐',
   error: '다시 시도',
 }
+
+const MODEL_MODES: ReadonlyArray<{ mode: ModelDisplayMode; label: string }> = [
+  { mode: 'original', label: '원본' },
+  { mode: 'hologram', label: '홀로그램' },
+]
+
+/** 파일 고르기 창이 걸러 줄 확장자. 형식 표가 쥔다. */
+const OPENABLE = FORMATS.filter((format) => format.planned === undefined)
+  .flatMap((format) => format.extensions)
+  .map((extension) => `.${extension}`)
+  .join(',')
 
 const EFFECT_LABELS: ReadonlyArray<{ level: EffectLevel; label: string }> = [
   { level: 'high', label: '높게' },
@@ -145,6 +163,50 @@ function pickedOf(clauses: SelectionClauses): number | null {
   return row === -1 ? null : row
 }
 
+/**
+ * 3D 모델 자산의 정보 패널.
+ *
+ * 표에는 표와 분포 그래프가 있어서 무엇을 열었는지 화면이 스스로 말한다. 모델은
+ * 덩어리 하나만 떠 있어서, 제대로 열린 것인지 무엇이 빠진 것인지 알 길이 없다.
+ * 데이터층이 세어 둔 것을 여기서 보여 준다.
+ */
+function ModelPanel({ model, onClose }: { model: LoadedModel; onClose: () => void }) {
+  const rows: [string, string][] = [
+    ['형식', model.format === 'glb' ? 'GLB' : 'glTF'],
+    ['메시', `${count(model.summary.meshes)}개`],
+    ['재질', `${count(model.summary.materials)}개`],
+    ['삼각형', `${count(model.summary.triangles)}개`],
+  ]
+  if (model.summary.textures > 0) rows.push(['텍스처', `${count(model.summary.textures)}개`])
+  if (model.summary.generator !== null) rows.push(['만든 곳', model.summary.generator])
+
+  return (
+    <section className="holo-model">
+      <h3>
+        {model.name}
+        <button type="button" className="holo-chip" onClick={onClose}>
+          닫기
+        </button>
+      </h3>
+      <dl className="holo-model-facts">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {model.notices
+        .filter((one) => one.level === 'warning')
+        .map((one) => (
+          <p key={one.message} className="holo-notice">
+            {one.message}
+          </p>
+        ))}
+    </section>
+  )
+}
+
 /** 임베딩을 줄이는 계산이 어디까지 갔는지. 표 이름을 달아 지난 표의 결과를 걸러 낸다. */
 type Reduction =
   | { kind: 'idle' }
@@ -202,6 +264,17 @@ export function Workspace() {
   const [state, run] = useReducer(reduce, undefined, () =>
     createWorkspaceState('작업 공간 열기 · 고객문의 샘플'),
   )
+
+  /*
+   * 무대에 올라온 3D 모델. null이면 표를 본다.
+   *
+   * 작업 공간이 자산을 하나만 들고 있어서 상태도 하나다. 여러 자산을 나란히 놓는
+   * 것은 M5의 뷰 레지스트리 몫이고, 그때 이 자리가 자산 목록으로 넓어진다. 표를
+   * 같이 들고 있는 까닭은 모델을 닫고 돌아올 자리를 남기기 위해서다.
+   */
+  const [modelAsset, setModelAsset] = useState<LoadedModel | null>(null)
+  const [modelMode, setModelMode] = useState<ModelDisplayMode>('original')
+  const [modelFailed, setModelFailed] = useState<string | null>(null)
 
   const [hovered, setHovered] = useState<number | null>(null)
   const [lasso, setLasso] = useState(false)
@@ -396,7 +469,45 @@ export function Workspace() {
     run({ kind: 'select', label: `자산 열기 · ${label}`, next: () => new Map() })
   }, [])
 
+  /**
+   * 3D 모델을 무대에 올린다.
+   *
+   * 표는 그대로 둔다. 모델을 닫으면 보던 화면으로 돌아와야 하기 때문이다. 카메라만
+   * 비운다 — 점 구름을 보던 자리에서 모델을 보면 좌표 범위가 달라 엉뚱한 곳을 본다.
+   */
+  const openModel = useCallback((next: LoadedModel) => {
+    setModelAsset(next)
+    setModelFailed(null)
+    setModelMode('original')
+    setCamera(null)
+    setHovered(null)
+    run({ kind: 'note', label: `자산 열기 · ${next.name}` })
+  }, [])
+
+  const closeModel = useCallback(() => {
+    setModelAsset(null)
+    setModelFailed(null)
+    setCamera(null)
+    run({ kind: 'note', label: '3D 모델 닫기' })
+  }, [])
+
+  /** 읽개가 돌려준 자산을 종류에 맞는 자리로 보낸다. */
+  const openAsset = useCallback(
+    (asset: Asset) => {
+      if (asset.kind === 'model') {
+        openModel(asset.model)
+        return
+      }
+      setModelAsset(null)
+      setModelFailed(null)
+      openTable(asset.table, asset.name)
+    },
+    [openModel, openTable],
+  )
+
   const openSample = useCallback(() => {
+    setModelAsset(null)
+    setModelFailed(null)
     openTable(sampleLoadedTable(), '고객문의 샘플')
   }, [openTable])
 
@@ -408,20 +519,34 @@ export function Workspace() {
    * 돌아갈 자리가 없어진다.
    */
   const reading = useRef<TableJob | null>(null)
+  /** 표가 아닌 읽기까지 덮는 번호표. 워커가 없으므로 멈추는 대신 결과를 버린다. */
+  const latestRead = useRef(0)
   const [busy, setBusy] = useState<string | null>(null)
   const openFile = useCallback(
     async (blob: File) => {
       reading.current?.cancel()
-      const job = startTableRead(blob)
-      reading.current = job
+      latestRead.current += 1
+      const ticket = latestRead.current
       setNotice(null)
       setBusy(blob.name)
       try {
+        const kind = await kindOfFile(blob)
+        if (latestRead.current !== ticket) return
+
+        if (kind === 'model') {
+          openModel(await readModelFile(blob))
+          return
+        }
+        // 종류를 모르는 파일도 표 읽개로 보낸다. 거기서 까닭 있는 오류가 나온다.
+        const job = startTableRead(blob)
+        reading.current = job
         const table = await job.result
-        if (reading.current !== job) return
+        if (latestRead.current !== ticket) return
+        setModelAsset(null)
+        setModelFailed(null)
         openTable(table, blob.name)
       } catch (error) {
-        if (reading.current !== job) return
+        if (latestRead.current !== ticket) return
         const message =
           error instanceof UnsupportedFileError
             ? error.message
@@ -429,13 +554,13 @@ export function Workspace() {
         setNotice(message)
         run({ kind: 'note', label: `파일 열기 실패 · ${blob.name}` })
       } finally {
-        if (reading.current === job) {
+        if (latestRead.current === ticket) {
           reading.current = null
           setBusy(null)
         }
       }
     },
-    [openTable],
+    [openModel, openTable],
   )
 
   // 화면을 떠날 때 읽던 것을 멈춘다. 워커가 남아 계속 돌면 안 된다.
@@ -449,6 +574,11 @@ export function Workspace() {
   const setEffectLevel = useCallback((level: EffectLevel, label: string) => {
     setEffect(level)
     run({ kind: 'note', label: `효과 강도 · ${label}` })
+  }, [])
+
+  const setDisplayMode = useCallback((mode: ModelDisplayMode, label: string) => {
+    setModelMode(mode)
+    run({ kind: 'note', label: `표시 모드 · ${label}` })
   }, [])
 
   const toggleLasso = useCallback(() => {
@@ -546,6 +676,17 @@ export function Workspace() {
         run: toggleLasso,
       },
     ]
+    if (modelAsset !== null) {
+      for (const { mode, label } of MODEL_MODES) {
+        list.push({
+          group: '표시 모드',
+          label: `3D 모델 · ${label}`,
+          disabled: modelMode === mode,
+          run: () => setDisplayMode(mode, label),
+        })
+      }
+      list.push({ group: '자산', label: '3D 모델 닫고 표로 돌아가기', run: closeModel })
+    }
     for (const { level, label } of EFFECT_LABELS) {
       list.push({
         group: '효과',
@@ -594,6 +735,10 @@ export function Workspace() {
     setEffectLevel,
     exportWorkspace,
     forgetWorkspace,
+    modelAsset,
+    modelMode,
+    setDisplayMode,
+    closeModel,
     openSample,
   ])
 
@@ -633,6 +778,14 @@ export function Workspace() {
     if (status === 'error') setHandOn(false)
   }, [])
 
+  /** 뷰가 장면을 푸는 데 실패하면 까닭을 무대 아래에 띄운다. */
+  const onModelStatus = useCallback(
+    (status: 'loading' | 'ready' | 'failed', message: string | null) => {
+      setModelFailed(status === 'failed' ? message : null)
+    },
+    [],
+  )
+
   const pointColorOf = useCallback(
     (row: number) => {
       const role = model.category
@@ -648,20 +801,42 @@ export function Workspace() {
   const hoveredName = hoveredSlot < 0 ? '' : (model.category?.names[hoveredSlot] ?? '')
 
   return (
-    <main className="holo-workspace">
+    <main className={'holo-workspace' + (modelAsset === null ? '' : ' is-stage-only')}>
       <header className="holo-header">
         <h1>홀로그램 데이터 뷰어</h1>
         <p className="holo-caption">
-          {model.label} · {count(rowCount)}행 · 선택 {count(everything.count)}건
+          {modelAsset === null ? (
+            <>
+              {model.label} · {count(rowCount)}행 · 선택 {count(everything.count)}건
+            </>
+          ) : (
+            <>
+              {modelAsset.name} · 메시 {count(modelAsset.summary.meshes)}개 · 삼각형{' '}
+              {count(modelAsset.summary.triangles)}개
+            </>
+          )}
         </p>
         <div className="holo-controls">
-          <button
-            type="button"
-            className={'holo-chip' + (lasso ? ' is-on' : '')}
-            onClick={toggleLasso}
-          >
-            올가미 {lasso ? '켜짐' : '꺼짐'}
-          </button>
+          {modelAsset === null ? (
+            <button
+              type="button"
+              className={'holo-chip' + (lasso ? ' is-on' : '')}
+              onClick={toggleLasso}
+            >
+              올가미 {lasso ? '켜짐' : '꺼짐'}
+            </button>
+          ) : (
+            MODEL_MODES.map(({ mode, label }) => (
+              <button
+                type="button"
+                key={mode}
+                className={'holo-chip' + (modelMode === mode ? ' is-on' : '')}
+                onClick={() => setDisplayMode(mode, label)}
+              >
+                {label}
+              </button>
+            ))
+          )}
           {EFFECT_LABELS.map(({ level, label }) => (
             <button
               type="button"
@@ -699,7 +874,17 @@ export function Workspace() {
 
       <div className="holo-main">
         <div className="holo-stage-slot">
-          {model.position === null ? (
+          {modelAsset !== null ? (
+            <ModelView
+              bytes={modelAsset.bytes}
+              mode={modelMode}
+              effect={effect}
+              camera={camera}
+              onCameraRest={setCamera}
+              drive={drive}
+              onStatus={onModelStatus}
+            />
+          ) : model.position === null ? (
             <div className="holo-stage-empty">
               <p>{model.positionMissing}</p>
               <p className="holo-caption">
@@ -729,6 +914,12 @@ export function Workspace() {
               <span className="holo-caption">{busy}을(를) 읽고 있습니다…</span>
             ) : notice !== null ? (
               <span className="holo-notice">{notice}</span>
+            ) : modelFailed !== null ? (
+              <span className="holo-notice">{modelFailed}</span>
+            ) : modelAsset !== null ? (
+              <span className="holo-caption">
+                끌어서 돌리고, 굴려서 확대한다. 표시 모드를 바꾸면 홀로그램으로 볼 수 있다.
+              </span>
             ) : hoveredText === null ? (
               <span className="holo-caption">
                 {model.position?.derivedFrom ??
@@ -748,38 +939,43 @@ export function Workspace() {
         </div>
 
         <aside className="holo-side">
-          <FileDropZone compact onLoaded={(next, name) => openTable(next, name)} />
-          <DistributionView
-            rowCount={rowCount}
-            category={model.category}
-            measure={model.measure}
-            visibleForCategories={forBars.mask}
-            visibleForMeasure={forHistogram.mask}
-            categories={categorySlots}
-            range={range}
-            onCategories={onCategories}
-            onRange={onRange}
-          />
+          <FileDropZone compact onLoaded={openAsset} />
+          {modelAsset !== null ? <ModelPanel model={modelAsset} onClose={closeModel} /> : null}
+          {modelAsset !== null ? null : (
+            <DistributionView
+              rowCount={rowCount}
+              category={model.category}
+              measure={model.measure}
+              visibleForCategories={forBars.mask}
+              visibleForMeasure={forHistogram.mask}
+              categories={categorySlots}
+              range={range}
+              onCategories={onCategories}
+              onRange={onRange}
+            />
+          )}
           <ActivityLog entries={state.log} />
         </aside>
       </div>
 
-      <section className="holo-bottom">
-        <TableView
-          columns={model.columns}
-          rows={tableRows}
-          visibleCount={forTable.count}
-          hovered={hovered}
-          onHover={setHovered}
-          picked={picked}
-          onPick={onPickRow}
-        />
-      </section>
+      {modelAsset !== null ? null : (
+        <section className="holo-bottom">
+          <TableView
+            columns={model.columns}
+            rows={tableRows}
+            visibleCount={forTable.count}
+            hovered={hovered}
+            onHover={setHovered}
+            picked={picked}
+            onPick={onPickRow}
+          />
+        </section>
+      )}
 
       <input
         ref={tablePicker}
         type="file"
-        accept=".csv,.tsv,.txt,.json,.jsonl,.ndjson"
+        accept={OPENABLE}
         hidden
         onChange={(event) => {
           const blob = event.target.files?.[0]

@@ -11,6 +11,14 @@
   padding: 16px;
 }
 
+/*
+ * 아래 표가 없을 때는 무대가 그 자리까지 쓴다. 칸을 그대로 두면 행이 비어 있는 채로
+ * 자리를 차지해서, 3D 모델만 띄웠을 때 화면 아래 절반이 검게 남는다.
+ */
+.holo-workspace.is-stage-only {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .holo-header {
   display: flex;
   flex-wrap: wrap;
@@ -484,4 +492,56 @@
   .holo-cluster-label {
     transition: none;
   }
+}
+
+/* 3D 모델 정보 패널. 표를 대신해 무엇을 열었는지 말해 준다. */
+.holo-model {
+  display: grid;
+  gap: 12px;
+}
+
+.holo-model h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--holo-dim);
+  /* 파일 이름은 길다. 줄여서 칸을 밀어내지 않게 한다. */
+  min-width: 0;
+}
+
+.holo-model h3 > :first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.holo-model-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.holo-model-facts div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.holo-model-facts dt {
+  font-size: 0.68rem;
+  color: var(--holo-faint);
+}
+
+.holo-model-facts dd {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--holo-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
