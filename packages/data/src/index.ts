@@ -23,13 +23,21 @@ export type { VectorColumn, WideVectorGroup } from './vectorColumn'
 export { assetIdOfFile, assetIdOfShape, fingerprint } from './assetId'
 export type { FileIdentity } from './assetId'
 
-export {
-  UnsupportedFileError,
-  loadJson,
-  loadJsonLines,
-  loadRecords,
-  readTableFile,
-} from './readTableFile'
+export { FORMATS, extensionOf, plannedMessage, resolveFormat, supportedLabels } from './formats'
+export type { AssetKind, FormatEntry } from './formats'
+
+export { kindOfFile, readAssetFile } from './loaderRegistry'
+export type { Asset, ReadableAsset } from './loaderRegistry'
+
+export { UnsupportedFileError } from './unsupported'
+
+export { noticesOfModel, readModelFile } from './readModelFile'
+export type { LoadedModel, ReadableBinaryFile } from './readModelFile'
+
+export { looksLikeGlb, readGlb, readGltfJson, summarizeGltf } from './gltf'
+export type { GltfDocument, GltfFormat, GltfSummary } from './gltf'
+
+export { loadJson, loadJsonLines, loadRecords, readTableFile } from './readTableFile'
 export type { ReadableFile } from './readTableFile'
 
 export { DEFAULT_PCA, pcaTo3D } from './pca'

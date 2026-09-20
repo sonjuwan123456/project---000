@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { UnsupportedFileError, startTableRead, type LoadedTable, type TableJob } from '@holo/data'
+import {
+  FORMATS,
+  UnsupportedFileError,
+  kindOfFile,
+  readModelFile,
+  startTableRead,
+  supportedLabels,
+  type Asset,
+  type TableJob,
+} from '@holo/data'
 
 /**
  * 파일을 끌어다 놓는 자리 — 대표 사용 흐름의 1단계.
@@ -9,17 +18,23 @@ import { UnsupportedFileError, startTableRead, type LoadedTable, type TableJob }
  * `dragleave`는 자식 위를 지나갈 때도 올라온다. 들어온 횟수를 세지 않으면 테두리가
  * 끌고 있는 내내 깜빡인다.
  *
- * 읽기는 워커에서 돈다. 5만 행짜리 파일이면 본 스레드에서 수 초가 걸리고, 그동안
- * "읽는 중" 글자조차 그려지지 않아 앱이 죽은 것처럼 보인다.
+ * 표 읽기는 워커에서 돈다. 5만 행짜리 파일이면 본 스레드에서 수 초가 걸리고, 그동안
+ * "읽는 중" 글자조차 그려지지 않아 앱이 죽은 것처럼 보인다. 3D 모델은 여기서 바로
+ * 읽는다. 하는 일이 상자를 열어 JSON 한 덩어리를 보는 것뿐이라 화면이 굳지 않고,
+ * 무거운 쪽(메시를 GPU로 올리는 일)은 어차피 주 스레드의 렌더러 몫이다.
  */
 export type FileDropZoneProps = {
-  /** 다 읽으면 표와 파일 이름을 넘긴다. 무엇을 띄울지는 받는 쪽이 정한다. */
-  onLoaded: (table: LoadedTable, fileName: string) => void
+  /** 다 읽으면 자산을 넘긴다. 무엇을 띄울지는 받는 쪽이 정한다. */
+  onLoaded: (asset: Asset) => void
   /** 이미 불러온 파일이 있으면 화면을 덮지 않고 가장자리에만 붙는다. */
   compact?: boolean
 }
 
-const ACCEPT = '.csv,.tsv,.txt,.json,.jsonl,.ndjson'
+/** 파일 고르기 창이 걸러 줄 확장자. 형식 표에서 만든다 — 손으로 적으면 반드시 어긋난다. */
+const ACCEPT = FORMATS.filter((format) => format.planned === undefined)
+  .flatMap((format) => format.extensions)
+  .map((extension) => `.${extension}`)
+  .join(',')
 
 type Phase =
   { kind: 'idle' } | { kind: 'reading'; fileName: string } | { kind: 'error'; message: string }
@@ -30,31 +45,47 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
   const depth = useRef(0)
   const picker = useRef<HTMLInputElement>(null)
 
-  /** 지금 읽고 있는 일감. 새 파일이 오거나 화면을 떠나면 멈춘다. */
+  /** 지금 읽고 있는 표 일감. 새 파일이 오거나 화면을 떠나면 멈춘다. */
   const reading = useRef<TableJob | null>(null)
+  /** 표가 아닌 읽기까지 덮는 표. 워커가 없으므로 멈추는 대신 결과를 버린다. */
+  const latest = useRef(0)
   useEffect(() => () => reading.current?.cancel(), [])
 
   const load = useCallback(
     async (file: File) => {
       reading.current?.cancel()
-      const job = startTableRead(file)
-      reading.current = job
+      latest.current += 1
+      const ticket = latest.current
       setPhase({ kind: 'reading', fileName: file.name })
+
       try {
-        const table = await job.result
+        const kind = await kindOfFile(file)
+        if (latest.current !== ticket) return
+
+        let asset: Asset
+        if (kind === 'model') {
+          const model = await readModelFile(file)
+          asset = { kind: 'model', assetId: model.assetId, name: file.name, model }
+        } else {
+          // 종류를 모르는 파일도 표 읽개로 보낸다. 거기서 까닭 있는 오류가 나온다.
+          const job = startTableRead(file)
+          reading.current = job
+          const table = await job.result
+          if (reading.current === job) reading.current = null
+          asset = { kind: 'table', assetId: table.assetId, name: file.name, table }
+        }
+
         // 그사이 다른 파일이 들어왔으면 이 결과는 버린다.
-        if (reading.current !== job) return
+        if (latest.current !== ticket) return
         setPhase({ kind: 'idle' })
-        onLoaded(table, file.name)
+        onLoaded(asset)
       } catch (error) {
-        if (reading.current !== job) return
+        if (latest.current !== ticket) return
         const message =
           error instanceof UnsupportedFileError
             ? error.message
             : `'${file.name}'을(를) 읽지 못했습니다. 파일이 온전한지 확인해 주세요.`
         setPhase({ kind: 'error', message })
-      } finally {
-        if (reading.current === job) reading.current = null
       }
     },
     [onLoaded],
@@ -125,7 +156,7 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
       ) : (
         <>
           <p className="holo-drop-title">{compact ? '다른 파일 열기' : '파일을 끌어다 놓으세요'}</p>
-          {compact ? null : <p className="holo-drop-caption">CSV, TSV, JSON, JSON Lines</p>}
+          {compact ? null : <p className="holo-drop-caption">{supportedLabels().join(', ')}</p>}
           <button type="button" className="holo-chip" onClick={() => picker.current?.click()}>
             파일 고르기
           </button>

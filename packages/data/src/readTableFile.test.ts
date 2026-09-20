@@ -96,8 +96,13 @@ describe('readTableFile', () => {
     await expect(readTableFile(fileOf('표.parquet', ''))).rejects.toThrow(UnsupportedFileError)
   })
 
-  it('모르는 확장자는 받는 형식을 알려 준다', async () => {
-    await expect(readTableFile(fileOf('사진.png', ''))).rejects.toThrow(/CSV, TSV, JSON/)
+  it('등록은 되어 있지만 아직 뷰가 없는 형식은 그 사실을 말한다', async () => {
+    // 이미지는 형식 표에 있고 M4가 채울 자리다. "표로 못 읽는다"보다 이 말이 맞다.
+    await expect(readTableFile(fileOf('사진.png', ''))).rejects.toThrow(/이미지 패널은 아직/)
+  })
+
+  it('형식 표에 아예 없는 확장자는 받는 형식을 알려 준다', async () => {
+    await expect(readTableFile(fileOf('무엇.zzz', ''))).rejects.toThrow(/CSV·TSV, JSON/)
   })
 
   it('컬럼을 못 찾으면 첫 줄을 확인하라고 한다', async () => {

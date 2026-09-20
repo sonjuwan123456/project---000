@@ -2,7 +2,7 @@
  * 시각화층. 뷰 레지스트리와 뷰 구현.
  *
  * 뷰는 서로를 모른다. 선택은 조건으로만 발행하고 합치는 일은 코디네이터가 한다.
- * 3D 모델 뷰와 텍스트 패널은 M2, 뷰 레지스트리는 작업 공간을 붙이는 M4에서 채운다.
+ * 3D 모델 뷰가 M2에서 들어왔다. 뷰 레지스트리는 작업 공간을 붙이는 M5에서 채운다.
  */
 export const PACKAGE_NAME = '@holo/views'
 
@@ -20,3 +20,5 @@ export { ClusterLabels } from './ClusterLabels'
 export type { ClusterLabelsProps } from './ClusterLabels'
 export { ActivityLog } from './ActivityLog'
 export type { ActivityLogProps } from './ActivityLog'
+export { ModelView, fitToStage } from './ModelView'
+export type { ModelDisplayMode, ModelViewProps } from './ModelView'
