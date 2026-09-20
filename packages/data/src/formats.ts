@@ -14,6 +14,7 @@
  */
 
 import { looksLikeGlb } from './gltf'
+import { extensionsOfFlavor } from './textFlavor'
 
 export type AssetKind = 'table' | 'model' | 'text'
 
@@ -44,6 +45,9 @@ export const FORMATS: readonly FormatEntry[] = [
   { id: 'json-lines', label: 'JSON Lines', kind: 'table', extensions: ['jsonl', 'ndjson'] },
   { id: 'gltf-binary', label: 'GLB', kind: 'model', extensions: ['glb'], sniff: looksLikeGlb },
   { id: 'gltf-json', label: 'glTF', kind: 'model', extensions: ['gltf'] },
+  { id: 'log', label: '로그', kind: 'text', extensions: extensionsOfFlavor('log') },
+  { id: 'markdown', label: '마크다운', kind: 'text', extensions: extensionsOfFlavor('markdown') },
+  { id: 'code', label: '코드', kind: 'text', extensions: extensionsOfFlavor('code') },
 
   // ── 아직 못 읽는 것들. M4 형식 확장이 순서대로 채운다. ──
   {

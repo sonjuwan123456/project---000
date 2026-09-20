@@ -20,19 +20,24 @@ import {
 } from '@holo/core'
 import {
   FORMATS,
+  PreferTextError,
   UnsupportedFileError,
   anchorsOf,
+  buildText,
   kindOfFile,
   loadDelimitedText,
   readModelFile,
+  readTextFile,
   sampleCsv,
   startPca,
   startTableRead,
   toViewModel,
   vectorToReduce,
   type Asset,
+  type DetectedEncoding,
   type LoadedModel,
   type LoadedTable,
+  type LoadedText,
   type PcaResult,
   type TableJob,
   type ViewModel,
@@ -48,6 +53,7 @@ import {
   ModelView,
   PointCloudView,
   TableView,
+  TextPanel,
   type ModelDisplayMode,
   type PaletteCommand,
 } from '@holo/views'
@@ -275,6 +281,7 @@ export function Workspace() {
   const [modelAsset, setModelAsset] = useState<LoadedModel | null>(null)
   const [modelMode, setModelMode] = useState<ModelDisplayMode>('original')
   const [modelFailed, setModelFailed] = useState<string | null>(null)
+  const [textAsset, setTextAsset] = useState<LoadedText | null>(null)
 
   const [hovered, setHovered] = useState<number | null>(null)
   const [lasso, setLasso] = useState(false)
@@ -464,6 +471,7 @@ export function Workspace() {
    */
   const openTable = useCallback((table: LoadedTable, label: string) => {
     setSource({ table, label })
+    setTextAsset(null)
     setCamera(null)
     setHovered(null)
     run({ kind: 'select', label: `자산 열기 · ${label}`, next: () => new Map() })
@@ -477,11 +485,48 @@ export function Workspace() {
    */
   const openModel = useCallback((next: LoadedModel) => {
     setModelAsset(next)
+    setTextAsset(null)
     setModelFailed(null)
     setModelMode('original')
     setCamera(null)
     setHovered(null)
     run({ kind: 'note', label: `자산 열기 · ${next.name}` })
+  }, [])
+
+  /**
+   * 글자 파일을 무대에 올린다. 모델과 같은 규칙이다 — 표는 그대로 두고 닫으면 돌아온다.
+   *
+   * 카메라는 건드리지 않는다. 텍스트 패널은 3D가 아니라서, 닫고 돌아왔을 때 보던
+   * 자리가 그대로면 오히려 반갑다.
+   */
+  const openText = useCallback((next: LoadedText) => {
+    setTextAsset(next)
+    setModelAsset(null)
+    setModelFailed(null)
+    setHovered(null)
+    run({ kind: 'note', label: `자산 열기 · ${next.name}` })
+  }, [])
+
+  const closeText = useCallback(() => {
+    setTextAsset(null)
+    run({ kind: 'note', label: '텍스트 닫기' })
+  }, [])
+
+  /**
+   * 인코딩을 바꿔 고른다. 파일을 다시 읽지 않고 들고 있던 바이트를 다시 푼다.
+   *
+   * 다시 읽으면 두 가지가 곤란하다. 끌어다 놓은 파일은 `File`이 남아 있지만 앞으로
+   * 올 길(붙여넣기, URL)은 그렇지 않고, 무엇보다 32MB를 다시 읽는 값이 아깝다.
+   */
+  const changeEncoding = useCallback((encoding: DetectedEncoding) => {
+    setTextAsset((current) => {
+      if (current === null) return current
+      return buildText({ assetId: current.assetId, name: current.name }, current.bytes, {
+        forcedEncoding: encoding,
+        byteLength: current.byteLength,
+      })
+    })
+    run({ kind: 'note', label: `인코딩 · ${encoding}` })
   }, [])
 
   const closeModel = useCallback(() => {
@@ -498,16 +543,21 @@ export function Workspace() {
         openModel(asset.model)
         return
       }
+      if (asset.kind === 'text') {
+        openText(asset.text)
+        return
+      }
       setModelAsset(null)
       setModelFailed(null)
       openTable(asset.table, asset.name)
     },
-    [openModel, openTable],
+    [openModel, openText, openTable],
   )
 
   const openSample = useCallback(() => {
     setModelAsset(null)
     setModelFailed(null)
+    setTextAsset(null)
     openTable(sampleLoadedTable(), '고객문의 샘플')
   }, [openTable])
 
@@ -537,10 +587,23 @@ export function Workspace() {
           openModel(await readModelFile(blob))
           return
         }
+        if (kind === 'text') {
+          openText(await readTextFile(blob))
+          return
+        }
         // 종류를 모르는 파일도 표 읽개로 보낸다. 거기서 까닭 있는 오류가 나온다.
         const job = startTableRead(blob)
         reading.current = job
-        const table = await job.result
+        let table: LoadedTable
+        try {
+          table = await job.result
+        } catch (error) {
+          // 표가 아니었을 뿐이면 실패로 두지 않고 글자로 연다(로그로 온 .txt 같은 것).
+          if (!(error instanceof PreferTextError)) throw error
+          if (latestRead.current !== ticket) return
+          openText(await readTextFile(blob))
+          return
+        }
         if (latestRead.current !== ticket) return
         setModelAsset(null)
         setModelFailed(null)
@@ -560,7 +623,7 @@ export function Workspace() {
         }
       }
     },
-    [openModel, openTable],
+    [openModel, openText, openTable],
   )
 
   // 화면을 떠날 때 읽던 것을 멈춘다. 워커가 남아 계속 돌면 안 된다.
@@ -687,6 +750,9 @@ export function Workspace() {
       }
       list.push({ group: '자산', label: '3D 모델 닫고 표로 돌아가기', run: closeModel })
     }
+    if (textAsset !== null) {
+      list.push({ group: '자산', label: '텍스트 닫고 표로 돌아가기', run: closeText })
+    }
     for (const { level, label } of EFFECT_LABELS) {
       list.push({
         group: '효과',
@@ -739,6 +805,8 @@ export function Workspace() {
     modelMode,
     setDisplayMode,
     closeModel,
+    textAsset,
+    closeText,
     openSample,
   ])
 
@@ -794,6 +862,9 @@ export function Workspace() {
     [model],
   )
 
+  /** 무대가 화면을 통째로 쓰는 상태. 3D 모델과 글자 파일은 표·분포와 나란히 두지 않는다. */
+  const stageOnly = modelAsset !== null || textAsset !== null
+
   const hoveredText = hovered === null ? null : model.rowLabel(hovered)
   const hoveredSlot =
     hovered === null || model.category === null ? -1 : model.category.slotOf(hovered)
@@ -801,23 +872,31 @@ export function Workspace() {
   const hoveredName = hoveredSlot < 0 ? '' : (model.category?.names[hoveredSlot] ?? '')
 
   return (
-    <main className={'holo-workspace' + (modelAsset === null ? '' : ' is-stage-only')}>
+    <main className={'holo-workspace' + (stageOnly ? ' is-stage-only' : '')}>
       <header className="holo-header">
         <h1>홀로그램 데이터 뷰어</h1>
         <p className="holo-caption">
-          {modelAsset === null ? (
-            <>
-              {model.label} · {count(rowCount)}행 · 선택 {count(everything.count)}건
-            </>
-          ) : (
+          {modelAsset !== null ? (
             <>
               {modelAsset.name} · 메시 {count(modelAsset.summary.meshes)}개 · 삼각형{' '}
               {count(modelAsset.summary.triangles)}개
             </>
+          ) : textAsset !== null ? (
+            <>
+              {textAsset.name} · {count(textAsset.lines.length)}줄
+            </>
+          ) : (
+            <>
+              {model.label} · {count(rowCount)}행 · 선택 {count(everything.count)}건
+            </>
           )}
         </p>
         <div className="holo-controls">
-          {modelAsset === null ? (
+          {textAsset !== null ? (
+            <button type="button" className="holo-chip" onClick={closeText}>
+              텍스트 닫기
+            </button>
+          ) : modelAsset === null ? (
             <button
               type="button"
               className={'holo-chip' + (lasso ? ' is-on' : '')}
@@ -874,7 +953,9 @@ export function Workspace() {
 
       <div className="holo-main">
         <div className="holo-stage-slot">
-          {modelAsset !== null ? (
+          {textAsset !== null ? (
+            <TextPanel text={textAsset} onEncodingChange={changeEncoding} />
+          ) : modelAsset !== null ? (
             <ModelView
               bytes={modelAsset.bytes}
               mode={modelMode}
@@ -916,6 +997,10 @@ export function Workspace() {
               <span className="holo-notice">{notice}</span>
             ) : modelFailed !== null ? (
               <span className="holo-notice">{modelFailed}</span>
+            ) : textAsset !== null ? (
+              <span className="holo-caption">
+                찾기로 줄을 좁힌다. 글자가 깨져 보이면 위에서 인코딩을 바꿔 고른다.
+              </span>
             ) : modelAsset !== null ? (
               <span className="holo-caption">
                 끌어서 돌리고, 굴려서 확대한다. 표시 모드를 바꾸면 홀로그램으로 볼 수 있다.
@@ -941,7 +1026,7 @@ export function Workspace() {
         <aside className="holo-side">
           <FileDropZone compact onLoaded={openAsset} />
           {modelAsset !== null ? <ModelPanel model={modelAsset} onClose={closeModel} /> : null}
-          {modelAsset !== null ? null : (
+          {stageOnly ? null : (
             <DistributionView
               rowCount={rowCount}
               category={model.category}
@@ -958,7 +1043,7 @@ export function Workspace() {
         </aside>
       </div>
 
-      {modelAsset !== null ? null : (
+      {stageOnly ? null : (
         <section className="holo-bottom">
           <TableView
             columns={model.columns}

@@ -182,3 +182,59 @@ describe('readAssetFile', () => {
     expect((error as Error).message).toContain('GLB')
   })
 })
+
+describe('텍스트 자산', () => {
+  it('.log는 텍스트로 읽는다', async () => {
+    const asset = await readAssetFile(
+      fileOf(
+        'app.log',
+        `2026-09-20 12:01:30 [INFO] 시작
+2026-09-20 12:01:35 [ERROR] 실패
+`,
+      ),
+    )
+    expect(asset.kind).toBe('text')
+    if (asset.kind !== 'text') throw new Error('텍스트여야 한다')
+    expect(asset.text.flavor).toBe('log')
+    expect(asset.text.lines).toHaveLength(2)
+  })
+
+  it('.md와 코드 파일도 텍스트다', async () => {
+    expect((await readAssetFile(fileOf('읽어주세요.md', '# 제목'))).kind).toBe('text')
+    expect((await readAssetFile(fileOf('Workspace.tsx', 'const a = 1'))).kind).toBe('text')
+    expect(await kindOfFile(fileOf('app.log', ''))).toBe('text')
+  })
+
+  it('표로 읽으려다 글이었던 파일도 열린다', async () => {
+    // 예전에는 여기서 UnsupportedFileError로 끝났다.
+    const asset = await readAssetFile(
+      fileOf(
+        '출력.txt',
+        `2026-09-20 12:01:30 [INFO] 시작
+2026-09-20 12:01:31 [INFO] 대기
+2026-09-20 12:01:35 [ERROR] 실패
+2026-09-20 12:01:36 [WARN] 재시도
+2026-09-20 12:01:40 [INFO] 연결됨
+`,
+      ),
+    )
+    expect(asset.kind).toBe('text')
+    if (asset.kind !== 'text') throw new Error('텍스트여야 한다')
+    expect(asset.text.flavor).toBe('log')
+    // 왜 표가 아니라 글로 열렸는지 사람에게 먼저 말한다.
+    expect(asset.text.notices[0]).toMatchObject({ level: 'warning' })
+    expect(asset.text.notices[0]?.message).toContain('글자')
+  })
+
+  it('진짜 못 읽는 파일은 여전히 막는다', async () => {
+    await expect(readAssetFile(fileOf('사진.png', 'x'))).rejects.toBeInstanceOf(
+      UnsupportedFileError,
+    )
+  })
+
+  it('받는 형식 목록에 글자 갈래가 들어간다', () => {
+    expect(supportedLabels()).toContain('로그')
+    expect(supportedLabels()).toContain('마크다운')
+    expect(supportedLabels()).toContain('코드')
+  })
+})

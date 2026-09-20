@@ -545,3 +545,289 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* 텍스트 패널 */
+
+.holo-text {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.holo-text-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--holo-line);
+  /* 칸이 좁아지면 줄을 바꾼다. 찾기 칸이 밀려 나가 사라지는 것이 제일 나쁘다. */
+  flex-wrap: wrap;
+}
+
+.holo-text-name {
+  font-size: 0.85rem;
+  color: var(--holo-text);
+  /* 파일 이름은 길다. 줄여서 나머지를 밀어내지 않게 한다. */
+  max-width: 22ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.holo-text-fact {
+  font-size: 0.72rem;
+  color: var(--holo-faint);
+}
+
+.holo-text-encoding {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.holo-text-encoding-label {
+  font-size: 0.68rem;
+  color: var(--holo-faint);
+}
+
+.holo-text-encoding select {
+  border: 1px solid var(--holo-line);
+  border-radius: 999px;
+  background: var(--holo-surface);
+  padding: 4px 8px;
+  color: var(--holo-dim);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.holo-text-search {
+  border: 1px solid var(--holo-line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 4px 12px;
+  color: var(--holo-text);
+  font: inherit;
+  font-size: 0.75rem;
+  width: 14ch;
+}
+
+.holo-text-search:focus {
+  outline: none;
+  border-color: var(--holo-accent);
+}
+
+.holo-text-levels {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--holo-line);
+}
+
+/*
+ * 레벨 색은 범주 팔레트에서 빌려 쓴다. 로그 레벨만을 위한 토큰을 새로 두면 팔레트가
+ * 둘이 되고, 둘은 반드시 어긋난다.
+ */
+.holo-level.is-error {
+  color: var(--holo-cat-2);
+  border-color: color-mix(in srgb, var(--holo-cat-2) 50%, transparent);
+}
+
+.holo-level.is-warn {
+  color: var(--holo-cat-4);
+  border-color: color-mix(in srgb, var(--holo-cat-4) 50%, transparent);
+}
+
+.holo-level.is-info {
+  color: var(--holo-cat-0);
+  border-color: color-mix(in srgb, var(--holo-cat-0) 50%, transparent);
+}
+
+.holo-level.is-debug {
+  color: var(--holo-dim);
+}
+
+.holo-level.is-trace {
+  color: var(--holo-faint);
+}
+
+/* 꺼진 레벨. 색을 빼서 "지금 안 보이는 것"을 한눈에 만든다. */
+.holo-level.is-off {
+  color: var(--holo-faint);
+  border-color: var(--holo-line);
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.holo-text-notice {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--holo-line);
+  color: var(--holo-cat-4);
+  font-size: 0.75rem;
+}
+
+.holo-text-body {
+  overflow: auto;
+  min-height: 0;
+}
+
+.holo-text-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--holo-faint);
+  font-size: 0.8rem;
+}
+
+.holo-text-line {
+  display: grid;
+  grid-template-columns: 5ch minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 0 14px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--holo-text);
+  white-space: pre;
+}
+
+.holo-text-number {
+  color: var(--holo-faint);
+  text-align: right;
+  user-select: none;
+}
+
+.holo-text-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.holo-text-line.is-error {
+  color: var(--holo-cat-2);
+}
+
+.holo-text-line.is-warn {
+  color: var(--holo-cat-4);
+}
+
+.holo-text-line.is-debug,
+.holo-text-line.is-trace {
+  color: var(--holo-dim);
+}
+
+.holo-text-content mark {
+  background: color-mix(in srgb, var(--holo-accent) 30%, transparent);
+  color: var(--holo-text);
+  border-radius: 3px;
+}
+
+/* 마크다운 */
+
+.holo-text-body.is-rendered {
+  padding: 20px 28px 40px;
+}
+
+.holo-markdown {
+  max-width: 78ch;
+  color: var(--holo-text);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.holo-markdown h1,
+.holo-markdown h2,
+.holo-markdown h3,
+.holo-markdown h4,
+.holo-markdown h5,
+.holo-markdown h6 {
+  margin: 1.6em 0 0.6em;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.holo-markdown > :first-child {
+  margin-top: 0;
+}
+
+.holo-markdown h1 {
+  font-size: 1.5rem;
+}
+
+.holo-markdown h2 {
+  font-size: 1.2rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--holo-line);
+}
+
+.holo-markdown h3 {
+  font-size: 1rem;
+  color: var(--holo-dim);
+}
+
+.holo-markdown p,
+.holo-markdown ul,
+.holo-markdown ol {
+  margin: 0 0 1em;
+}
+
+.holo-markdown li {
+  margin-bottom: 0.3em;
+}
+
+.holo-markdown a {
+  color: var(--holo-accent);
+}
+
+.holo-markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--holo-line) 55%, transparent);
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.holo-markdown pre {
+  margin: 0 0 1em;
+  padding: 12px 14px;
+  border: 1px solid var(--holo-line);
+  border-radius: 10px;
+  background: var(--holo-surface);
+  overflow-x: auto;
+}
+
+.holo-markdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.holo-markdown blockquote {
+  margin: 0 0 1em;
+  padding-left: 14px;
+  border-left: 2px solid var(--holo-line);
+  color: var(--holo-dim);
+}
+
+.holo-markdown hr {
+  margin: 1.8em 0;
+  border: none;
+  border-top: 1px solid var(--holo-line);
+}
+
+.holo-markdown table {
+  margin: 0 0 1em;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.holo-markdown th,
+.holo-markdown td {
+  padding: 6px 12px;
+  border: 1px solid var(--holo-line);
+  text-align: left;
+}
+
+.holo-markdown th {
+  color: var(--holo-faint);
+  font-weight: 400;
+}
