@@ -9,7 +9,13 @@ import {
   type Camera,
   type ShaderMaterial,
 } from 'three'
-import { categoryPalette, holoColors, type RowMask, type StoredCamera } from '@holo/core'
+import {
+  categoryPalette,
+  holoColors,
+  type CameraDrive,
+  type RowMask,
+  type StoredCamera,
+} from '@holo/core'
 import type { ClusterAnchor, Positions } from '@holo/data'
 import {
   glowPass,
@@ -19,6 +25,7 @@ import {
   type EffectLevel,
 } from '@holo/holo-fx'
 import { ClusterLabels } from './ClusterLabels'
+import { createOrbitDrive } from './orbitDrive'
 
 /**
  * 3D 점 뷰 — 설계 문서 5장의 "강조" 반응을 맡는 뷰.
@@ -46,6 +53,8 @@ export type PointCloudViewProps = {
   camera: StoredCamera | null
   /** 카메라를 놓은 순간의 위치. 드래그하는 동안에는 부르지 않는다. */
   onCameraRest: (camera: StoredCamera) => void
+  /** 손 제스처가 카메라를 움직일 수 있게 내주는 손잡이. 3D 뷰가 떠 있는 동안에만 채워진다. */
+  drive?: RefObject<CameraDrive | null>
 }
 
 type CameraHandle = { camera: Camera; width: number; height: number } | null
@@ -329,7 +338,7 @@ function LassoLayer(props: {
 
 export function PointCloudView(props: PointCloudViewProps) {
   const { rowCount, positions, colorOf, selected, effect, lasso } = props
-  const { onHover, onLasso, camera, onCameraRest } = props
+  const { onHover, onLasso, camera, onCameraRest, drive } = props
   const anchors = props.anchors ?? []
   const handle = useRef<CameraHandle>(null)
   const controls = useRef<OrbitControlsHandle>(null)
@@ -343,6 +352,16 @@ export function PointCloudView(props: PointCloudViewProps) {
     controls.current.target.set(...camera.target)
     controls.current.update()
   }, [camera])
+
+  // 손 제스처는 React 밖의 렌더 루프에서 온다. 상태로 올리면 초당 60번 다시 그리게 되므로
+  // 컨트롤을 직접 만지는 손잡이만 내준다(설계 문서 3장의 live 저장소와 같은 이유다).
+  useEffect(() => {
+    if (!drive) return
+    drive.current = createOrbitDrive(() => controls.current, onCameraRest)
+    return () => {
+      drive.current = null
+    }
+  }, [drive, onCameraRest])
 
   return (
     <div className="holo-stage">
