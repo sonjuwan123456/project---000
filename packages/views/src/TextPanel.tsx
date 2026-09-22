@@ -5,11 +5,13 @@ import {
   LOG_LEVEL_LABELS,
   SELECTABLE_ENCODINGS,
   countByLevel,
+  extensionOf,
   levelAt,
   type DetectedEncoding,
   type LoadedText,
   type LogLevel,
 } from '@holo/data'
+import { highlightLines, styleOf, type CodeToken } from './highlight'
 import { parseMarkdown, type MarkdownBlock, type MarkdownSpan } from './markdown'
 
 /**
@@ -25,7 +27,12 @@ import { parseMarkdown, type MarkdownBlock, type MarkdownSpan } from './markdown
  * 만 줄을 DOM에 그대로 올리면 스크롤이 끊기므로 표 뷰와 같은 방식으로 보이는 구간만
  * 만든다. 마크다운은 다르다. 블록마다 높이가 달라 자리를 미리 셀 수 없어서 통째로
  * 그리고, 대신 아주 긴 마크다운은 줄 모드로 보라고 말한다.
+ *
+ * 코드는 줄 모드 그대로 두고 색만 입힌다. 문법 규칙은 파일을 연 뒤에 붙으므로,
+ * 색이 오기 전에도 글자는 이미 떠 있다. 색칠을 못 하는 파일(규칙이 없거나 너무 긴
+ * 파일)도 마찬가지로 그냥 열린다 — 색은 있으면 좋은 것이지 여는 조건이 아니다.
  */
+
 export type TextPanelProps = {
   text: LoadedText
   /** 사람이 인코딩을 바꿔 고르면 알린다. 파일을 다시 읽지 않고 바이트만 다시 푼다. */
@@ -36,6 +43,40 @@ const LINE_HEIGHT = 22
 const OVERSCAN = 8
 /** 이보다 긴 마크다운은 그리지 않고 줄 모드로 연다. 블록 수만 줄에 비례해 늘어난다. */
 const MARKDOWN_LINE_LIMIT = 5_000
+
+/**
+ * 한 줄을 그린다. 색칠한 조각이 있으면 그 위에 찾은 글자를 덧칠한다.
+ *
+ * 두 가지가 같은 글자를 서로 다르게 자르는 자리다. 문법은 `const`와 `"여기"`로 자르고,
+ * 찾기는 사람이 친 글자로 자른다. 조각마다 찾기를 한 번 더 돌리면 둘이 포개진다 —
+ * 어느 한쪽을 포기하지 않아도 된다.
+ */
+function LineText({
+  line,
+  tokens,
+  query,
+}: {
+  line: string
+  tokens: readonly CodeToken[] | undefined
+  query: string
+}) {
+  const pieces: readonly { text: string; style?: ReturnType<typeof styleOf> }[] =
+    tokens === undefined
+      ? [{ text: line }]
+      : tokens.map((one) => ({ text: one.text, style: styleOf(one) }))
+
+  return (
+    <>
+      {pieces.map((piece, index) => (
+        <span key={index} style={piece.style}>
+          {splitByQuery(piece.text, query).map((part, at) =>
+            part.hit ? <mark key={at}>{part.text}</mark> : <span key={at}>{part.text}</span>,
+          )}
+        </span>
+      ))}
+    </>
+  )
+}
 
 const FLAVOR_LABELS = {
   plain: '글',
@@ -204,7 +245,26 @@ export function TextPanel({ text, onEncodingChange }: TextPanelProps) {
     setFirst(0)
   }, [query, hidden])
 
+  /*
+   * 문법 규칙은 코드 파일을 열 때만 받는다(설계 문서 6장). 그래서 여기가 기다리는
+   * 자리이고, 오는 동안에도 글자는 떠 있다. 파일이 바뀌면 먼저 비워서 지난 파일의
+   * 색이 새 글자에 얹히지 않게 한다.
+   */
+  const [tokens, setTokens] = useState<CodeToken[][] | null>(null)
+  useEffect(() => {
+    setTokens(null)
+    if (text.flavor !== 'code') return
+    let alive = true
+    void highlightLines(text.lines, extensionOf(text.name)).then((made) => {
+      if (alive) setTokens(made)
+    })
+    return () => {
+      alive = false
+    }
+  }, [text.flavor, text.lines, text.name])
+
   const tooLongToRender = text.lines.length > MARKDOWN_LINE_LIMIT
+
   const rendered = text.flavor === 'markdown' && !raw && query === '' && !tooLongToRender
   const blocks = useMemo(() => (rendered ? parseMarkdown(text.lines) : []), [rendered, text.lines])
 
@@ -324,13 +384,11 @@ export function TextPanel({ text, onEncodingChange }: TextPanelProps) {
                         {row + 1}
                       </span>
                       <span className="holo-text-content">
-                        {splitByQuery(text.lines[row] ?? '', query).map((part, index) =>
-                          part.hit ? (
-                            <mark key={index}>{part.text}</mark>
-                          ) : (
-                            <span key={index}>{part.text}</span>
-                          ),
-                        )}
+                        <LineText
+                          line={text.lines[row] ?? ''}
+                          tokens={tokens?.[row]}
+                          query={query}
+                        />
                       </span>
                     </div>
                   )

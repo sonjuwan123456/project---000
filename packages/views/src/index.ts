@@ -40,3 +40,5 @@ export {
 } from './thumbnail'
 
 export { disposeScene, parseGltf } from './gltfParse'
+export { HIGHLIGHT_LINE_LIMIT, canHighlight, highlightLines, styleOf } from './highlight'
+export type { CodeToken } from './highlight'
