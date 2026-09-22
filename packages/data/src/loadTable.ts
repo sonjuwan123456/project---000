@@ -391,13 +391,39 @@ export function loadDelimitedText(text: string, options: LoadDelimitedOptions = 
     report?.(progressOf('parsing', text.length === 0 ? 1 : read / text.length)),
   )
   const table = buildTable(parsed.header, parsed.columns, parsed.rowCount, options)
-  if (parsed.overflowRows.length === 0) return table
-  const notices: LoadNotice[] = [
-    ...table.notices,
-    {
+  const notices = [...table.notices, ...brokenNotices(parsed)]
+  return notices.length === table.notices.length ? table : { ...table, notices }
+}
+
+/**
+ * 파일이 성하지 않을 때 무엇이 어긋났는지 말한다.
+ *
+ * 구분자 파서는 웬만하면 오류를 내지 않는다. 칸이 모자라면 비우고 남으면 버리고,
+ * 따옴표가 안 닫히면 나머지를 통째로 한 칸에 담는다. 그 덕에 깨진 파일도 열리기는
+ * 하는데, 아무 말이 없으면 사람은 **자기 행이 어디로 갔는지 모른 채 멀쩡해 보이는
+ * 표**를 본다. 설계 문서 9장 M1의 완료 기준이 "깨진 파일을 넣어도 이해할 수 있는
+ * 결과"인 자리다.
+ */
+function brokenNotices(parsed: DelimitedTable): LoadNotice[] {
+  const notices: LoadNotice[] = []
+  if (parsed.overflowRows.length > 0) {
+    notices.push({
       level: 'warning',
       message: `헤더보다 칸이 많은 행이 ${parsed.overflowRows.length}개 있습니다. 넘친 값은 읽지 않았습니다.`,
-    },
-  ]
-  return { ...table, notices }
+    })
+  }
+  if (parsed.shortRows.length > 0) {
+    notices.push({
+      level: 'warning',
+      message: `헤더보다 칸이 적은 행이 ${parsed.shortRows.length}개 있습니다. 모자란 칸은 비워 두었습니다.`,
+    })
+  }
+  if (parsed.unterminatedQuote) {
+    notices.push({
+      level: 'warning',
+      message:
+        '따옴표가 닫히지 않은 채 파일이 끝났습니다. 그 뒤의 줄은 한 칸 안으로 들어가 행으로 세지 않았습니다.',
+    })
+  }
+  return notices
 }

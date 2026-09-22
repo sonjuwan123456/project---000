@@ -64,3 +64,43 @@ describe('parseDelimitedText', () => {
     expect(table.header[1]).toBe('컬럼 2')
   })
 })
+
+describe('성하지 않은 파일', () => {
+  /*
+   * 파서는 웬만하면 오류를 내지 않는다. 그래서 무엇이 어긋났는지 여기서 세어 두지
+   * 않으면, 사람은 자기 행이 어디로 갔는지 모른 채 멀쩡해 보이는 표를 본다.
+   */
+  it('헤더보다 칸이 적은 행을 센다', () => {
+    const parsed = parseDelimitedText('a,b,c\n1,2\n3,4,5\n6\n')
+    expect(parsed.shortRows).toEqual([0, 2])
+    expect(parsed.overflowRows).toEqual([])
+  })
+
+  it('통째로 빈 줄은 모자란 것으로 세지 않는다 — 파일 끝의 빈 줄이 흔하다', () => {
+    expect(parseDelimitedText('a,b\n1,2\n\n3,4\n\n').shortRows).toEqual([])
+  })
+
+  it('넘친 행과 모자란 행을 따로 센다 — 사람이 할 일이 다르다', () => {
+    const parsed = parseDelimitedText('a,b\n1,2,3\n4\n')
+    expect(parsed.overflowRows).toEqual([0])
+    expect(parsed.shortRows).toEqual([1])
+  })
+
+  it('따옴표가 닫히지 않은 채 끝나면 그렇다고 알린다', () => {
+    expect(parseDelimitedText('a,b\n"열린 것,2\n3,4\n').unterminatedQuote).toBe(true)
+  })
+
+  it('성한 파일에서는 아무것도 걸리지 않는다', () => {
+    const parsed = parseDelimitedText('a,b\n1,2\n"닫은 것",4\n')
+    expect(parsed.shortRows).toEqual([])
+    expect(parsed.overflowRows).toEqual([])
+    expect(parsed.unterminatedQuote).toBe(false)
+  })
+
+  it('따옴표 안의 줄바꿈은 성한 것이다', () => {
+    const parsed = parseDelimitedText('a,b\n"두\n줄",2\n')
+    expect(parsed.unterminatedQuote).toBe(false)
+    expect(parsed.rowCount).toBe(1)
+    expect(parsed.shortRows).toEqual([])
+  })
+})
