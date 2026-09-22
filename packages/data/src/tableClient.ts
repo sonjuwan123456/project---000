@@ -9,7 +9,12 @@
  */
 
 import { attachLookup, type BuildOptions, type LoadedTable } from './loadTable'
-import { UnsupportedFileError, readTableFile, type ReadableFile } from './readTableFile'
+import {
+  PreferTextError,
+  UnsupportedFileError,
+  readTableFile,
+  type ReadableFile,
+} from './readTableFile'
 import type { TableRequest, TableResponse } from './tableWorker'
 import { canUseWorker } from './workerSupport'
 
@@ -63,9 +68,11 @@ export function startTableRead(file: ReadableFile, options: BuildOptions = {}): 
       }
       // 읽을 수 없는 형식은 부르는 쪽이 사용자에게 그대로 보여 준다. 종류를 살려 보낸다.
       reject(
-        message.unsupported
-          ? new UnsupportedFileError(message.fileName, message.message)
-          : new Error(message.message),
+        message.preferText
+          ? new PreferTextError(message.fileName, message.message)
+          : message.unsupported
+            ? new UnsupportedFileError(message.fileName, message.message)
+            : new Error(message.message),
       )
     }
     worker.onerror = (event) => {

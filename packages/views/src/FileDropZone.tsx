@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   FORMATS,
+  PreferTextError,
   UnsupportedFileError,
   kindOfFile,
   readModelFile,
+  readTextFile,
   startTableRead,
   supportedLabels,
   type Asset,
@@ -62,17 +64,39 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
         const kind = await kindOfFile(file)
         if (latest.current !== ticket) return
 
+        const asTextAsset = async (reason?: string): Promise<Asset> => {
+          const text = await readTextFile(file)
+          return {
+            kind: 'text',
+            assetId: text.assetId,
+            name: file.name,
+            text:
+              reason === undefined
+                ? text
+                : { ...text, notices: [{ level: 'warning', message: reason }, ...text.notices] },
+          }
+        }
+
         let asset: Asset
         if (kind === 'model') {
           const model = await readModelFile(file)
           asset = { kind: 'model', assetId: model.assetId, name: file.name, model }
+        } else if (kind === 'text') {
+          asset = await asTextAsset()
         } else {
           // 종류를 모르는 파일도 표 읽개로 보낸다. 거기서 까닭 있는 오류가 나온다.
           const job = startTableRead(file)
           reading.current = job
-          const table = await job.result
-          if (reading.current === job) reading.current = null
-          asset = { kind: 'table', assetId: table.assetId, name: file.name, table }
+          try {
+            const table = await job.result
+            asset = { kind: 'table', assetId: table.assetId, name: file.name, table }
+          } catch (error) {
+            // 표가 아니었을 뿐이면 실패로 두지 않고 글자로 연다(로그로 온 .txt 같은 것).
+            if (!(error instanceof PreferTextError)) throw error
+            asset = await asTextAsset(error.message)
+          } finally {
+            if (reading.current === job) reading.current = null
+          }
         }
 
         // 그사이 다른 파일이 들어왔으면 이 결과는 버린다.

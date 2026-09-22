@@ -10,7 +10,12 @@
  */
 
 import type { BuildOptions, LoadedTableData } from './loadTable'
-import { UnsupportedFileError, readTableFile, type ReadableFile } from './readTableFile'
+import {
+  PreferTextError,
+  UnsupportedFileError,
+  readTableFile,
+  type ReadableFile,
+} from './readTableFile'
 import { transferable, workerScope } from './workerSupport'
 
 export type TableRequest = {
@@ -26,6 +31,8 @@ export type TableResponse =
       readonly ok: false
       /** true면 읽을 수 없는 형식이라 막은 것이다. 사용자에게 그대로 보여 줄 문구다. */
       readonly unsupported: boolean
+      /** true면 실패가 아니라 갈래를 잘못 짚은 것이다. 부르는 쪽이 텍스트로 다시 연다. */
+      readonly preferText: boolean
       readonly fileName: string
       readonly message: string
     }
@@ -71,6 +78,7 @@ export async function handleTableRequest(
         id: request.id,
         ok: false,
         unsupported,
+        preferText: error instanceof PreferTextError,
         fileName: request.file.name,
         message:
           error instanceof Error ? error.message : `'${request.file.name}'을(를) 읽지 못했습니다.`,

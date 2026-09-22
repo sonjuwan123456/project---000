@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  PreferTextError,
   UnsupportedFileError,
   loadJson,
   loadJsonLines,
@@ -107,5 +108,66 @@ describe('readTableFile', () => {
 
   it('컬럼을 못 찾으면 첫 줄을 확인하라고 한다', async () => {
     await expect(readTableFile(fileOf('빈.csv', ''))).rejects.toThrow(/첫 줄/)
+  })
+})
+
+/*
+ * 표로 읽으려다 글이었던 경우. 예전에는 "읽지 못합니다"로 끝났고, 사람은 파일이
+ * 멀쩡한데도 아무것도 못 봤다. 이제 텍스트 패널로 넘긴다.
+ */
+describe('표가 아닐 때 텍스트로 넘기기', () => {
+  const LOG = `2026-09-20 12:01:30 [INFO] 서버 시작
+2026-09-20 12:01:31 [INFO] 포트 대기
+2026-09-20 12:01:35 [ERROR] 연결 실패
+2026-09-20 12:01:36 [WARN] 재시도
+2026-09-20 12:01:40 [INFO] 연결됨
+`
+
+  it('.txt로 온 로그는 표로 읽지 않는다', async () => {
+    await expect(readTableFile(fileOf('출력.txt', LOG))).rejects.toBeInstanceOf(PreferTextError)
+  })
+
+  it('.csv라고 적힌 것은 내용을 보고 뒤집지 않는다', async () => {
+    // 사람이 표라고 이름 붙인 것을 내용으로 뒤집으면, 로그 모양 CSV가 열리지 않는다.
+    const table = await readTableFile(
+      fileOf(
+        '로그.csv',
+        `시각,레벨,메시지
+2026-09-20 12:01:35,ERROR,연결 실패
+2026-09-20 12:01:36,WARN,재시도
+`,
+      ),
+    )
+    expect(table.columns.map((column) => column.name)).toEqual(['시각', '레벨', '메시지'])
+  })
+
+  it('컬럼이 하나뿐인 .txt는 글로 본다', async () => {
+    await expect(
+      readTableFile(fileOf('메모.txt', '오늘 할 일\n장 보기\n빨래\n')),
+    ).rejects.toBeInstanceOf(PreferTextError)
+  })
+
+  it('컬럼이 하나뿐이어도 .csv는 표로 둔다', async () => {
+    const table = await readTableFile(fileOf('값.csv', '값\n1\n2\n3\n'))
+    expect(table.rowCount).toBe(3)
+  })
+
+  it('객체 배열이 아닌 JSON은 글로 본다', async () => {
+    // 설계 문서 6장: 깊게 중첩된 JSON은 트리 모양 텍스트 패널의 몫이다.
+    await expect(
+      readTableFile(fileOf('설정.json', '{"server":{"port":8080,"tls":{"on":true}}}')),
+    ).rejects.toBeInstanceOf(PreferTextError)
+  })
+
+  it('망가진 JSON은 글로 넘기지 않고 오류로 말한다', async () => {
+    // 이쪽은 진짜 실패다. 글자로 펼쳐 봐야 사람이 할 일이 없다.
+    const error = await readTableFile(fileOf('깨진.json', '{"a": ')).catch((one: unknown) => one)
+    expect(error).toBeInstanceOf(UnsupportedFileError)
+    expect(error).not.toBeInstanceOf(PreferTextError)
+  })
+
+  it('넘길 때도 파일 이름을 달고 간다', async () => {
+    const error = await readTableFile(fileOf('출력.txt', LOG)).catch((one: unknown) => one)
+    expect((error as PreferTextError).fileName).toBe('출력.txt')
   })
 })

@@ -29,7 +29,40 @@ export type { AssetKind, FormatEntry } from './formats'
 export { kindOfFile, readAssetFile } from './loaderRegistry'
 export type { Asset, ReadableAsset } from './loaderRegistry'
 
-export { UnsupportedFileError } from './unsupported'
+export { PreferTextError, UnsupportedFileError } from './unsupported'
+
+export {
+  TEXT_BYTE_LIMIT,
+  buildText,
+  countByLevel,
+  levelAt,
+  levelsOfLines,
+  readTextFile,
+  splitLines,
+} from './readTextFile'
+export type { LoadedText, ReadableTextFile } from './readTextFile'
+
+export {
+  LOG_LEVELS,
+  LOG_LEVEL_LABELS,
+  extensionsOfFlavor,
+  flavorOf,
+  flavorOfExtension,
+  hasLogTimestamp,
+  looksLikeLog,
+  looksLikeMarkdown,
+  parseLogLevel,
+} from './textFlavor'
+export type { LogLevel, TextFlavor } from './textFlavor'
+
+export {
+  ENCODING_LABELS,
+  SELECTABLE_ENCODINGS,
+  decodeText,
+  readBom,
+  trimToUtf8Boundary,
+} from './encoding'
+export type { DecodedText, DetectedEncoding } from './encoding'
 
 export { noticesOfModel, readModelFile } from './readModelFile'
 export type { LoadedModel, ReadableBinaryFile } from './readModelFile'
@@ -37,7 +70,13 @@ export type { LoadedModel, ReadableBinaryFile } from './readModelFile'
 export { looksLikeGlb, readGlb, readGltfJson, summarizeGltf } from './gltf'
 export type { GltfDocument, GltfFormat, GltfSummary } from './gltf'
 
-export { loadJson, loadJsonLines, loadRecords, readTableFile } from './readTableFile'
+export {
+  loadJson,
+  loadJsonLines,
+  loadRecords,
+  prefersTextPanel,
+  readTableFile,
+} from './readTableFile'
 export type { ReadableFile } from './readTableFile'
 
 export { DEFAULT_PCA, pcaTo3D } from './pca'
