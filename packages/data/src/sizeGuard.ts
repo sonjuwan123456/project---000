@@ -9,8 +9,9 @@
  * 적은 값은 이 스레드가 정한 것이고, 근거를 값 옆에 적어 두었다. 고치는 자리는
  * `LIMITS` 한 곳이다.
  *
- * zip 폭탄(압축 해제 후 크기 제한)은 여기 없다. 폴더·zip 불러오기가 아직 없어서
- * 풀어 볼 것이 없다. 그 일이 들어올 때 `checkUnpackedSize`가 이 옆에 붙는다.
+ * zip 폭탄(압축 해제 후 크기 제한)은 `checkUnpackedSize`가 본다. 설계 문서 6장이
+ * 따로 적어 둔 항목이고, 앞의 검사로는 못 막는다 — 42KB짜리 zip이 4GB로 풀리는 일이
+ * 있어서, 파일 크기만 보면 통과한 뒤에 탭이 죽는다.
  */
 
 import { extensionOf, resolveFormat, type AssetKind } from './formats'
@@ -122,7 +123,44 @@ export function limitsOf(kind: AssetKind): Limit {
   return LIMITS[kind]
 }
 
+/**
+ * 압축을 풀었을 때의 크기. zip 폭탄을 막는 자리다.
+ *
+ * 이 검사가 따로 있는 까닭은 zip 파일 자체의 크기로는 아무것도 알 수 없기 때문이다.
+ * 같은 바이트가 반복되면 압축률이 수천 배가 나오므로, 42KB짜리 zip이 4GB로 풀리는
+ * 일이 실제로 있다. 앞의 `checkFileSize`는 그런 zip을 아무 말 없이 통과시킨다.
+ *
+ * **재지 않고 적힌 값을 본다.** zip의 중앙 목록에는 항목마다 푼 뒤의 크기가 적혀
+ * 있어서, 한 바이트도 풀기 전에 합을 낼 수 있다. 풀어 가며 세는 방법도 있지만 그때는
+ * 이미 메모리를 쓴 뒤다. 적힌 값이 거짓말일 수는 있는데, 그건 푼 결과가 안 맞는
+ * 문제이지 탭이 죽는 문제가 아니다.
+ *
+ * 800MB는 모델 거부선(600MB)에 텍스처 몫을 얹은 자리다. 묶음 하나가 그보다 크면
+ * 어차피 그 안의 모델 하나가 따로 막힌다.
+ */
+export const MAX_UNPACKED_BYTES = 800 * MB
+
+export function checkUnpackedSize(label: string, bytes: number): SizeVerdict {
+  if (bytes > MAX_UNPACKED_BYTES) {
+    return {
+      level: 'block',
+      message:
+        `'${label}'은(는) 풀면 ${formatBytes(bytes)}라 열지 않았습니다. ` +
+        `압축 파일은 풀었을 때 ${formatBytes(MAX_UNPACKED_BYTES)}까지 열 수 있습니다. ` +
+        '필요한 파일만 담아 다시 압축하거나, 폴더째 넣어 주세요.',
+    }
+  }
+  if (bytes > MAX_UNPACKED_BYTES / 4) {
+    return {
+      level: 'warn',
+      message: `'${label}'은(는) 풀면 ${formatBytes(bytes)}입니다. 푸는 데 시간이 걸립니다.`,
+    }
+  }
+  return { level: 'ok' }
+}
+
 /** 확장자만 보고 종류를 낸다. 크기 검사 전에 파일을 열어 볼 필요가 없게. */
+
 export function kindOfName(name: string): AssetKind {
   if (extensionOf(name) === '') return 'table'
   return resolveFormat(name)?.kind ?? 'table'

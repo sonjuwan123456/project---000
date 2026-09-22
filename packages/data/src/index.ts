@@ -85,8 +85,29 @@ export type { PcaOptions, PcaResult } from './pca'
 export { PHASE_LABELS, progressOf, throttleProgress } from './progress'
 export type { LoadPhase, LoadProgress, ProgressReporter } from './progress'
 
-export { checkFileSize, formatBytes, kindOfName, limitsOf, sizeNotices } from './sizeGuard'
+export {
+  MAX_BUNDLE_FILES,
+  bundleBytes,
+  bundleOf,
+  findInBundle,
+  normalizePath,
+  pickPrimary,
+  resolveResources,
+} from './fileBundle'
+export type { BundleFile, FileBundle } from './fileBundle'
+export {
+  MAX_UNPACKED_BYTES,
+  checkFileSize,
+  checkUnpackedSize,
+  formatBytes,
+  kindOfName,
+  limitsOf,
+  sizeNotices,
+} from './sizeGuard'
 export type { SizeVerdict } from './sizeGuard'
+
+export { entriesOfZip, looksLikeZip } from './readZip'
+export type { ReadableZip } from './readZip'
 
 export { canUseWorker } from './workerSupport'
 

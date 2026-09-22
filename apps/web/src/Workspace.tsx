@@ -977,6 +977,8 @@ export function Workspace() {
           ) : modelAsset !== null ? (
             <ModelView
               bytes={modelAsset.bytes}
+              resources={modelAsset.resources}
+
               mode={modelMode}
               effect={effect}
               camera={camera}

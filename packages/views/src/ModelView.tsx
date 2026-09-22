@@ -6,6 +6,7 @@ import {
   Box3,
   DoubleSide,
   Group,
+  LoadingManager,
   Mesh,
   PMREMGenerator,
   ShaderMaterial,
@@ -16,6 +17,7 @@ import {
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { holoColors, type CameraDrive, type StoredCamera } from '@holo/core'
+import { normalizePath } from '@holo/data'
 import {
   maxPixelRatio,
   modelFragmentShader,
@@ -43,6 +45,13 @@ export type ModelDisplayMode = 'original' | 'hologram'
 export type ModelViewProps = {
   /** 원본 바이트. 이것이 바뀔 때만 다시 파싱한다. */
   bytes: ArrayBuffer
+  /**
+   * glTF가 가리키는 바깥 파일. 데이터층이 폴더·zip에서 찾아 온 것이다.
+   *
+   * 키는 glTF에 **적힌 그대로의 uri**다. three가 물어 올 때도 적힌 그대로 물어
+   * 오지만, 도구마다 `./`나 `%20`을 섞어 쓰므로 찾을 때 한 번 더 맞춰 본다.
+   */
+  resources?: ReadonlyMap<string, ArrayBuffer>
   mode: ModelDisplayMode
   effect: EffectLevel
   /** 되살릴 카메라. 첫 프레임에만 쓴다. */
@@ -74,13 +83,70 @@ type Parsed =
  * 것이 없기 때문이다. 바깥 파일을 가리키는 `.gltf`는 여기서 실패하는데, 데이터층이
  * 열기 전에 이미 그 사실을 세어 두었으므로 사람은 까닭을 먼저 읽는다.
  */
-function useParsedModel(bytes: ArrayBuffer): Parsed {
+/**
+ * 바깥 파일을 브라우저가 받아들일 주소로 바꿔 준다.
+ *
+ * three는 uri를 주소로 보고 받아 오려 한다. 파일은 이미 손에 있으므로 받아 올 곳이
+ * 없고, 그래서 지금까지 `.gltf`는 그 자리에서 실패했다. `LoadingManager`의 주소
+ * 바꿔치기로 그 요청을 우리가 쥔 바이트로 돌린다.
+ *
+ * MIME 종류를 붙이는 까닭은 텍스처 때문이다. 종류 없는 Blob 주소를 `<img>`에 물리면
+ * 브라우저가 내용을 보고 맞히기는 하지만, 확장자를 아는데 굳이 맡길 이유가 없다.
+ */
+const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  ktx2: 'image/ktx2',
+  bin: 'application/octet-stream',
+}
+
+function mimeOf(uri: string): string {
+  const clean = uri.split(/[?#]/)[0] ?? ''
+  const dot = clean.lastIndexOf('.')
+  const extension = dot === -1 ? '' : clean.slice(dot + 1).toLowerCase()
+  return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
+}
+
+/** 적힌 그대로 먼저 찾고, 안 되면 `./`와 `%20`을 풀어서 한 번 더 찾는다. */
+function resourceFor(
+  resources: ReadonlyMap<string, ArrayBuffer>,
+  normalized: ReadonlyMap<string, ArrayBuffer>,
+  url: string,
+): ArrayBuffer | undefined {
+  return resources.get(url) ?? normalized.get(normalizePath(url))
+}
+
+function useParsedModel(
+  bytes: ArrayBuffer,
+  resources: ReadonlyMap<string, ArrayBuffer> | undefined,
+): Parsed {
   const [parsed, setParsed] = useState<Parsed>({ kind: 'loading' })
 
   useEffect(() => {
     let alive = true
     setParsed({ kind: 'loading' })
-    const loader = new GLTFLoader()
+
+    /*
+     * 만든 Blob 주소는 우리가 거둬야 한다. 브라우저는 탭이 닫힐 때까지 쥐고 있어서,
+     * 모델을 몇 번 갈아 끼우면 텍스처가 통째로 메모리에 쌓인다.
+     */
+    const handed: string[] = []
+    const manager = new LoadingManager()
+    if (resources !== undefined && resources.size > 0) {
+      const normalized = new Map<string, ArrayBuffer>()
+      for (const [uri, buffer] of resources) normalized.set(normalizePath(uri), buffer)
+      manager.setURLModifier((url) => {
+        const buffer = resourceFor(resources, normalized, url)
+        if (buffer === undefined) return url
+        const handle = URL.createObjectURL(new Blob([buffer], { type: mimeOf(url) }))
+        handed.push(handle)
+        return handle
+      })
+    }
+
+    const loader = new GLTFLoader(manager)
     loader.parse(
       bytes,
       '',
@@ -96,8 +162,9 @@ function useParsedModel(bytes: ArrayBuffer): Parsed {
     )
     return () => {
       alive = false
+      for (const handle of handed) URL.revokeObjectURL(handle)
     }
-  }, [bytes])
+  }, [bytes, resources])
 
   /*
    * 장면을 버릴 때 GPU 자원을 직접 돌려준다. three는 참조가 끊겨도 스스로 반납하지
@@ -269,8 +336,8 @@ function Stage({
 }
 
 export function ModelView(props: ModelViewProps) {
-  const { bytes, mode, effect, camera, onCameraRest, drive, onStatus } = props
-  const parsed = useParsedModel(bytes)
+  const { bytes, resources, mode, effect, camera, onCameraRest, drive, onStatus } = props
+  const parsed = useParsedModel(bytes, resources)
   const controls = useRef<OrbitControlsHandle>(null)
   const start = camera?.position ?? DEFAULT_CAMERA
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { noticesOfModel, readModelFile, type ReadableBinaryFile } from './readModelFile'
 import type { GltfSummary } from './gltf'
+import { bundleOf } from './fileBundle'
 import { UnsupportedFileError } from './unsupported'
 
 function glbOf(document: unknown): ArrayBuffer {
@@ -173,5 +174,80 @@ describe('readModelFile 크기 안전장치', () => {
       arrayBuffer: async () => buffer,
     })
     expect(model.summary.meshes).toBe(1)
+  })
+})
+
+describe('noticesOfModel · 폴더에서 찾은 바깥 파일', () => {
+  const withExternals = { ...base, externalResources: ['scene.bin', 'wood.png'] }
+
+  it('다 찾았으면 경고가 사라지고 찾았다고 말한다', () => {
+    const notices = noticesOfModel(withExternals, [])
+    expect(notices.some((one) => one.level === 'warning')).toBe(false)
+    expect(notices.some((one) => one.message.includes('2개를 같은 폴더에서 찾아'))).toBe(true)
+  })
+
+  it('일부만 찾았으면 못 찾은 것만 말한다', () => {
+    const notices = noticesOfModel(withExternals, ['wood.png'])
+    const warning = notices.find((one) => one.level === 'warning')
+    expect(warning?.message).toContain('wood.png')
+    expect(warning?.message).not.toContain('scene.bin')
+    expect(notices.some((one) => one.message.includes('1개를 같은 폴더에서'))).toBe(true)
+  })
+
+  it('하나도 못 찾았으면 폴더째 넣어 보라고 한다', () => {
+    const warning = noticesOfModel(withExternals, ['scene.bin', 'wood.png']).find(
+      (one) => one.level === 'warning',
+    )
+    expect(warning?.message).toContain('폴더째')
+    expect(warning?.message).toContain('.glb')
+  })
+})
+
+describe('readModelFile · 묶음', () => {
+  it('묶음을 주면 바깥 파일을 찾아 함께 들고 온다', async () => {
+    const gltf = {
+      asset: { version: '2.0' },
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+      accessors: [{ count: 3 }],
+      buffers: [{ uri: 'scene.bin' }],
+      images: [{ uri: 'textures/wood%20floor.png' }],
+    }
+    const bin = new Uint8Array([1, 2, 3, 4]).buffer as ArrayBuffer
+    const png = new Uint8Array([9, 9]).buffer as ArrayBuffer
+    const bundle = bundleOf('모형', [
+      [
+        'scene.bin',
+        { name: 'scene.bin', size: 4, arrayBuffer: async () => bin, text: async () => '' },
+      ],
+      [
+        'textures/wood floor.png',
+        { name: 'wood floor.png', size: 2, arrayBuffer: async () => png, text: async () => '' },
+      ],
+    ])
+
+    const model = await readModelFile(fileOf('scene.gltf', JSON.stringify(gltf)), { bundle })
+    expect(model.resources.get('scene.bin')).toBe(bin)
+    expect(model.resources.get('textures/wood%20floor.png')).toBe(png)
+    expect(model.notices.some((one) => one.level === 'warning')).toBe(false)
+  })
+
+  it('묶음이 없으면 예전처럼 하나만 읽고 경고한다', async () => {
+    const gltf = {
+      asset: { version: '2.0' },
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+      accessors: [{ count: 3 }],
+      buffers: [{ uri: 'scene.bin' }],
+    }
+    const model = await readModelFile(fileOf('scene.gltf', JSON.stringify(gltf)))
+    expect(model.resources.size).toBe(0)
+    expect(model.notices.some((one) => one.level === 'warning')).toBe(true)
+  })
+
+  it('GLB는 묶음이 있어도 찾을 것이 없다', async () => {
+    const model = await readModelFile(fileOf('상자.glb', glbOf(cube)), {
+      bundle: bundleOf('모형', []),
+    })
+    expect(model.resources.size).toBe(0)
+    expect(model.summary.externalResources).toEqual([])
   })
 })
