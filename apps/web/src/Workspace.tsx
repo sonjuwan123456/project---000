@@ -57,6 +57,7 @@ import {
   ProgressBar,
   TableView,
   TextPanel,
+  useThumbnail,
   type ModelDisplayMode,
   type PaletteCommand,
 } from '@holo/views'
@@ -180,6 +181,18 @@ function pickedOf(clauses: SelectionClauses): number | null {
  * 데이터층이 세어 둔 것을 여기서 보여 준다.
  */
 function ModelPanel({ model, onClose }: { model: LoadedModel; onClose: () => void }) {
+  /*
+   * 미리보기는 모델을 한 번 더 그려서 만든다. 무대에 이미 같은 것이 떠 있는데 왜
+   * 또 그리느냐면, 무대는 카메라를 사람이 돌려 놓은 그대로여서 목록에 쓸 그림이
+   * 되지 못하기 때문이다. 여기서 만드는 것은 언제나 같은 각도의 한 장이다.
+   */
+  const thumbnail = useThumbnail({
+    kind: 'model',
+    assetId: model.assetId,
+    name: model.name,
+    model,
+  })
+
   const rows: [string, string][] = [
     ['형식', model.format === 'glb' ? 'GLB' : 'glTF'],
     ['메시', `${count(model.summary.meshes)}개`],
@@ -192,11 +205,15 @@ function ModelPanel({ model, onClose }: { model: LoadedModel; onClose: () => voi
   return (
     <section className="holo-model">
       <h3>
-        {model.name}
+        {thumbnail === null ? null : (
+          <img className="holo-thumb" src={thumbnail} alt="" width={48} height={48} />
+        )}
+        <span className="holo-model-name">{model.name}</span>
         <button type="button" className="holo-chip" onClick={onClose}>
           닫기
         </button>
       </h3>
+
       <dl className="holo-model-facts">
         {rows.map(([label, value]) => (
           <div key={label}>

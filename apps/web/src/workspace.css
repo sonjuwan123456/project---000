@@ -513,10 +513,27 @@
   min-width: 0;
 }
 
-.holo-model h3 > :first-child {
+.holo-model-name {
+  /* 파일 이름이 칸을 다 쓰고, 남는 것은 줄인다. 닫기 단추는 언제나 오른쪽 끝이다. */
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+ * 자산 미리보기. 바탕이 비치는 PNG라 격자 위에 얹히므로 테두리로 자리를 잡아 준다.
+ * 자산 목록이 M5에서 생기면 이 규칙이 그리로 간다.
+ */
+.holo-thumb {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  border: 1px solid var(--holo-line);
+  background: rgb(0 0 0 / 35%);
+  object-fit: contain;
 }
 
 .holo-model-facts {

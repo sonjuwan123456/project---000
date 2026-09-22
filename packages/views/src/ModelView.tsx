@@ -6,7 +6,6 @@ import {
   Box3,
   DoubleSide,
   Group,
-  LoadingManager,
   Mesh,
   PMREMGenerator,
   ShaderMaterial,
@@ -14,10 +13,10 @@ import {
   type Material,
   type WebGLRenderTarget,
 } from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { holoColors, type CameraDrive, type StoredCamera } from '@holo/core'
-import { normalizePath } from '@holo/data'
+import { disposeScene, parseGltf } from './gltfParse'
+
 import {
   maxPixelRatio,
   modelFragmentShader,
@@ -83,41 +82,6 @@ type Parsed =
  * 것이 없기 때문이다. 바깥 파일을 가리키는 `.gltf`는 여기서 실패하는데, 데이터층이
  * 열기 전에 이미 그 사실을 세어 두었으므로 사람은 까닭을 먼저 읽는다.
  */
-/**
- * 바깥 파일을 브라우저가 받아들일 주소로 바꿔 준다.
- *
- * three는 uri를 주소로 보고 받아 오려 한다. 파일은 이미 손에 있으므로 받아 올 곳이
- * 없고, 그래서 지금까지 `.gltf`는 그 자리에서 실패했다. `LoadingManager`의 주소
- * 바꿔치기로 그 요청을 우리가 쥔 바이트로 돌린다.
- *
- * MIME 종류를 붙이는 까닭은 텍스처 때문이다. 종류 없는 Blob 주소를 `<img>`에 물리면
- * 브라우저가 내용을 보고 맞히기는 하지만, 확장자를 아는데 굳이 맡길 이유가 없다.
- */
-const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  ktx2: 'image/ktx2',
-  bin: 'application/octet-stream',
-}
-
-function mimeOf(uri: string): string {
-  const clean = uri.split(/[?#]/)[0] ?? ''
-  const dot = clean.lastIndexOf('.')
-  const extension = dot === -1 ? '' : clean.slice(dot + 1).toLowerCase()
-  return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
-}
-
-/** 적힌 그대로 먼저 찾고, 안 되면 `./`와 `%20`을 풀어서 한 번 더 찾는다. */
-function resourceFor(
-  resources: ReadonlyMap<string, ArrayBuffer>,
-  normalized: ReadonlyMap<string, ArrayBuffer>,
-  url: string,
-): ArrayBuffer | undefined {
-  return resources.get(url) ?? normalized.get(normalizePath(url))
-}
-
 function useParsedModel(
   bytes: ArrayBuffer,
   resources: ReadonlyMap<string, ArrayBuffer> | undefined,
@@ -128,41 +92,21 @@ function useParsedModel(
     let alive = true
     setParsed({ kind: 'loading' })
 
-    /*
-     * 만든 Blob 주소는 우리가 거둬야 한다. 브라우저는 탭이 닫힐 때까지 쥐고 있어서,
-     * 모델을 몇 번 갈아 끼우면 텍스처가 통째로 메모리에 쌓인다.
-     */
-    const handed: string[] = []
-    const manager = new LoadingManager()
-    if (resources !== undefined && resources.size > 0) {
-      const normalized = new Map<string, ArrayBuffer>()
-      for (const [uri, buffer] of resources) normalized.set(normalizePath(uri), buffer)
-      manager.setURLModifier((url) => {
-        const buffer = resourceFor(resources, normalized, url)
-        if (buffer === undefined) return url
-        const handle = URL.createObjectURL(new Blob([buffer], { type: mimeOf(url) }))
-        handed.push(handle)
-        return handle
-      })
-    }
-
-    const loader = new GLTFLoader(manager)
-    loader.parse(
-      bytes,
-      '',
-      (gltf) => {
-        if (!alive) return
-        setParsed({ kind: 'ready', root: gltf.scene })
+    const parsed = parseGltf(bytes, resources)
+    void parsed.scene.then(
+      (root) => {
+        if (alive) setParsed({ kind: 'ready', root })
       },
-      (error) => {
+      (error: unknown) => {
         if (!alive) return
         const detail = error instanceof Error ? error.message : String(error)
         setParsed({ kind: 'failed', message: `3D 모델을 푸는 중에 멈췄습니다. ${detail}` })
       },
     )
+    // 만든 Blob 주소는 우리가 거둬야 한다. 브라우저는 탭이 닫힐 때까지 쥐고 있다.
     return () => {
       alive = false
-      for (const handle of handed) URL.revokeObjectURL(handle)
+      parsed.release()
     }
   }, [bytes, resources])
 
@@ -173,28 +117,10 @@ function useParsedModel(
   useEffect(() => {
     if (parsed.kind !== 'ready') return
     const { root } = parsed
-    return () => {
-      root.traverse((object) => {
-        if (!(object instanceof Mesh)) return
-        object.geometry.dispose()
-        for (const material of toArray(object.material)) {
-          for (const value of Object.values(material)) {
-            // 재질이 쥔 텍스처는 이름이 제각각이라 값으로 가린다.
-            if (value !== null && typeof value === 'object' && 'isTexture' in value) {
-              ;(value as { dispose(): void }).dispose()
-            }
-          }
-          material.dispose()
-        }
-      })
-    }
+    return () => disposeScene(root)
   }, [parsed])
 
   return parsed
-}
-
-function toArray(material: Material | Material[]): Material[] {
-  return Array.isArray(material) ? material : [material]
 }
 
 /**
