@@ -10,6 +10,7 @@
  */
 
 import type { BuildOptions, LoadedTableData } from './loadTable'
+import { progressOf, throttleProgress, type LoadProgress } from './progress'
 import {
   PreferTextError,
   UnsupportedFileError,
@@ -24,7 +25,14 @@ export type TableRequest = {
   readonly options?: BuildOptions
 }
 
-export type TableResponse =
+/**
+ * 일감 하나의 끝. 성공이거나 실패고, 하나만 온다.
+ *
+ * 진행률이 이 갈래에 없는 까닭은 `handleTableRequest`가 진행률을 돌려주지 않기
+ * 때문이다. 그쪽은 부르는 쪽이 준 콜백으로 나간다. 둘을 한 갈래로 묶으면 결과를
+ * 보는 자리마다 "이번 것은 진행률인가" 를 먼저 물어야 한다.
+ */
+export type TableResult =
   | { readonly id: number; readonly ok: true; readonly table: LoadedTableData }
   | {
       readonly id: number
@@ -36,6 +44,10 @@ export type TableResponse =
       readonly fileName: string
       readonly message: string
     }
+
+/** 워커 선을 건너오는 것 전부. 진행률은 끝나기 전에 여러 번 온다. */
+export type TableResponse =
+  TableResult | { readonly id: number; readonly kind: 'progress'; readonly progress: LoadProgress }
 
 /** 표에서 넘길 수 있는 버퍼를 모은다. 복사 한 번을 아낀다. */
 function buffersOf(table: LoadedTableData): ArrayBuffer[] {
@@ -58,9 +70,20 @@ function buffersOf(table: LoadedTableData): ArrayBuffer[] {
 /** 요청 하나를 처리한다. 워커 밖에서도 부를 수 있게 떼어 둔다(시험이 쓴다). */
 export async function handleTableRequest(
   request: TableRequest,
-): Promise<{ response: TableResponse; transfer: ArrayBuffer[] }> {
+  /** 중간 진행률을 내보낼 곳. 워커가 아니면(시험) 주지 않아도 된다. */
+  onProgress?: (progress: LoadProgress) => void,
+): Promise<{ response: TableResult; transfer: ArrayBuffer[] }> {
   try {
-    const loaded = await readTableFile(request.file, request.options ?? {})
+    const report = onProgress === undefined ? undefined : throttleProgress((one) => onProgress(one))
+    const loaded = await readTableFile(request.file, {
+      ...(request.options ?? {}),
+      ...(report === undefined ? {} : { onProgress: report }),
+    })
+    /*
+     * 마지막 한 번은 거르지 않고 내보낸다. 거르는 창에 걸리면 막대가 85%쯤에서
+     * 멈춘 채로 사라지고, 그 모습은 끝난 것이 아니라 그만둔 것처럼 보인다.
+     */
+    report?.flush(progressOf('building', 1))
     // 조회 함수는 넘어가지 않는다. 받는 쪽이 attachLookup으로 다시 단다.
     const table: LoadedTableData = {
       assetId: loaded.assetId,
@@ -92,7 +115,11 @@ export async function handleTableRequest(
 const scope = workerScope<TableRequest, TableResponse>()
 if (scope !== null) {
   scope.onmessage = (event) => {
-    void handleTableRequest(event.data).then(({ response, transfer }) => {
+    const { id } = event.data
+    void handleTableRequest(event.data, (progress) => {
+      // 진행률에는 넘길 버퍼가 없다. 복사할 것도 작은 객체 하나뿐이다.
+      scope.postMessage?.({ id, kind: 'progress', progress }, [])
+    }).then(({ response, transfer }) => {
       scope.postMessage?.(response, transfer)
     })
   }

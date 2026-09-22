@@ -10,6 +10,7 @@
 
 import type { ColumnLookup } from '@holo/core'
 import { assetIdOfShape } from './assetId'
+import { progressOf, type ProgressReporter } from './progress'
 import {
   DEFAULT_INFERENCE,
   isBlank,
@@ -260,6 +261,8 @@ export type BuildOptions = {
   readonly nativeVectors?: readonly VectorColumn[]
   /** 파일에서 뽑은 자산 id. 주지 않으면 표의 모양으로 만든다. */
   readonly assetId?: string
+  /** 진행률을 알린다. 주지 않으면 아무것도 세지 않는다. */
+  readonly onProgress?: ProgressReporter
 }
 
 /**
@@ -279,6 +282,11 @@ export function buildTable(
   const names = uniqueNames(header)
   const profiles = new Map<string, ColumnProfile>()
 
+  /*
+   * 종류 판별이 읽기에서 제일 오래 걸리는 단계다. 컬럼마다 모든 셀을 한 번씩 훑고,
+   * 384차원 임베딩이면 그 컬럼이 384개다. 그래서 여기를 컬럼 단위로 알린다.
+   */
+  const report = options.onProgress
   names.forEach((name, index) => {
     if (name !== header[index]) {
       notices.push({
@@ -287,6 +295,14 @@ export function buildTable(
         message: `이름이 같은 컬럼이 있어 '${header[index] ?? ''}'을(를) '${name}'으로 구분했습니다.`,
       })
     }
+    // "12/384"가 같이 뜬다. 막대가 멈춘 듯 보일 때 이 숫자가 움직이는 것이 근거가 된다.
+    report?.(
+      progressOf(
+        'profiling',
+        names.length === 0 ? 1 : index / names.length,
+        `컬럼 ${index + 1}/${names.length}`,
+      ),
+    )
     profiles.set(name, profileColumn(rawColumns[index] ?? [], inference))
   })
 
@@ -304,6 +320,8 @@ export function buildTable(
   const groups = groupWideVectorColumns(names, isNumeric, hasBlank)
   const hiddenColumns = new Set<string>()
   for (const group of groups) for (const name of group.columns) hiddenColumns.add(name)
+
+  report?.(progressOf('building', 0))
 
   // 3) 남은 컬럼을 종류대로 만든다.
   const columns: LoadedColumn[] = []
@@ -368,7 +386,10 @@ export type LoadDelimitedOptions = BuildOptions & {
 
 /** CSV·TSV 텍스트 하나를 자산으로 만든다. */
 export function loadDelimitedText(text: string, options: LoadDelimitedOptions = {}): LoadedTable {
-  const parsed: DelimitedTable = parseDelimitedText(text, options.delimiter)
+  const report = options.onProgress
+  const parsed: DelimitedTable = parseDelimitedText(text, options.delimiter, (read) =>
+    report?.(progressOf('parsing', text.length === 0 ? 1 : read / text.length)),
+  )
   const table = buildTable(parsed.header, parsed.columns, parsed.rowCount, options)
   if (parsed.overflowRows.length === 0) return table
   const notices: LoadNotice[] = [

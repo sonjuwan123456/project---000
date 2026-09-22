@@ -9,7 +9,16 @@
  */
 
 import { DEFAULT_PCA, pcaTo3D, type PcaOptions } from './pca'
+import { progressOf, throttleProgress, type LoadProgress } from './progress'
 import { transferable, workerScope } from './workerSupport'
+
+/**
+ * 워커로 보낼 수 있는 설정.
+ *
+ * `onProgress`는 함수라 구조화 복제를 통과하지 못한다. 그대로 실으면 `postMessage`가
+ * DataCloneError로 던진다. 타입에서 빼 두면 그 실수를 컴파일러가 잡는다.
+ */
+export type PcaRequestOptions = Omit<PcaOptions, 'onProgress'>
 
 export type PcaRequest = {
   readonly id: number
@@ -19,10 +28,10 @@ export type PcaRequest = {
   readonly values: Float32Array
   readonly missing: Uint8Array
   readonly missingCount: number
-  readonly options?: PcaOptions
+  readonly options?: PcaRequestOptions
 }
 
-export type PcaResponse =
+export type PcaWorkerResult =
   | {
       readonly id: number
       readonly ok: true
@@ -35,12 +44,21 @@ export type PcaResponse =
     }
   | { readonly id: number; readonly ok: false; readonly message: string }
 
+/** 워커 선을 건너오는 것 전부. 진행률은 끝나기 전에 여러 번 온다. */
+export type PcaResponse =
+  | PcaWorkerResult
+  | { readonly id: number; readonly kind: 'progress'; readonly progress: LoadProgress }
+
 /** 요청 하나를 처리한다. 워커 밖에서도 부를 수 있게 떼어 둔다(시험이 쓴다). */
-export function handlePcaRequest(request: PcaRequest): {
-  response: PcaResponse
+export function handlePcaRequest(
+  request: PcaRequest,
+  onProgress?: (progress: LoadProgress) => void,
+): {
+  response: PcaWorkerResult
   transfer: ArrayBuffer[]
 } {
   try {
+    const report = onProgress === undefined ? undefined : throttleProgress((one) => onProgress(one))
     const result = pcaTo3D(
       {
         name: request.name,
@@ -50,8 +68,15 @@ export function handlePcaRequest(request: PcaRequest): {
         missing: request.missing,
         missingCount: request.missingCount,
       },
-      request.options ?? DEFAULT_PCA,
+      {
+        ...(request.options ?? DEFAULT_PCA),
+        ...(report === undefined
+          ? {}
+          : { onProgress: (fraction: number) => report(progressOf('reducing', fraction)) }),
+      },
     )
+    // 막대가 끝까지 가는 것을 보고 사라져야 한다. 거르는 창에 걸리면 도중에 없어진다.
+    report?.flush(progressOf('reducing', 1))
     return {
       response: {
         id: request.id,
@@ -81,7 +106,10 @@ export function handlePcaRequest(request: PcaRequest): {
 const scope = workerScope<PcaRequest, PcaResponse>()
 if (scope !== null) {
   scope.onmessage = (event) => {
-    const { response, transfer } = handlePcaRequest(event.data)
+    const { id } = event.data
+    const { response, transfer } = handlePcaRequest(event.data, (progress) => {
+      scope.postMessage?.({ id, kind: 'progress', progress }, [])
+    })
     scope.postMessage?.(response, transfer)
   }
 }

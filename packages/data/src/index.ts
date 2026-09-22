@@ -82,6 +82,12 @@ export type { ReadableFile } from './readTableFile'
 export { DEFAULT_PCA, pcaTo3D } from './pca'
 export type { PcaOptions, PcaResult } from './pca'
 
+export { PHASE_LABELS, progressOf, throttleProgress } from './progress'
+export type { LoadPhase, LoadProgress, ProgressReporter } from './progress'
+
+export { checkFileSize, formatBytes, kindOfName, limitsOf, sizeNotices } from './sizeGuard'
+export type { SizeVerdict } from './sizeGuard'
+
 export { canUseWorker } from './workerSupport'
 
 export { startPca } from './pcaClient'
@@ -90,9 +96,9 @@ export type { PcaJob } from './pcaClient'
 export { startTableRead } from './tableClient'
 export type { TableJob } from './tableClient'
 
-export type { TableRequest, TableResponse } from './tableWorker'
+export type { TableRequest, TableResponse, TableResult } from './tableWorker'
 
-export type { PcaRequest, PcaResponse } from './pcaWorker'
+export type { PcaRequest, PcaRequestOptions, PcaResponse, PcaWorkerResult } from './pcaWorker'
 
 export { toViewModel, vectorToReduce } from './viewModel'
 export type {

@@ -171,3 +171,61 @@ describe('표가 아닐 때 텍스트로 넘기기', () => {
     expect((error as PreferTextError).fileName).toBe('출력.txt')
   })
 })
+
+const MB = 1024 * 1024
+
+/** 크기만 크다고 말하는 파일. 400MB짜리 문자열을 실제로 만들 수는 없다. */
+function sizedFile(name: string, size: number, text: string) {
+  return { name, size, lastModified: 1, text: () => Promise.resolve(text) }
+}
+
+describe('readTableFile 크기 안전장치', () => {
+  it('거부선을 넘는 표는 읽지 않고 까닭을 말한다', async () => {
+    await expect(readTableFile(sizedFile('아주큰표.csv', 500 * MB, 'a,b\n1,2'))).rejects.toThrow(
+      UnsupportedFileError,
+    )
+  })
+
+  it('막은 까닭에 파일 크기와 한계가 함께 나온다', async () => {
+    await expect(
+      readTableFile(sizedFile('아주큰표.csv', 500 * MB, 'a,b\n1,2')),
+    ).rejects.toThrowError(/500MB[\s\S]*400MB/)
+  })
+
+  it('파일을 열어 보기도 전에 막는다 — 여는 일 자체가 탭을 죽인다', async () => {
+    let opened = false
+    const file = {
+      name: '아주큰표.csv',
+      size: 500 * MB,
+      text: () => {
+        opened = true
+        return Promise.resolve('a,b\n1,2')
+      },
+    }
+    await expect(readTableFile(file)).rejects.toThrow(UnsupportedFileError)
+    expect(opened).toBe(false)
+  })
+
+  it('표인지 글인지 모르는 큰 파일은 막지 않고 글자로 보낸다', async () => {
+    await expect(readTableFile(sizedFile('거대한.txt', 500 * MB, '아무 글'))).rejects.toThrow(
+      PreferTextError,
+    )
+  })
+
+  it('경고선을 넘으면 열되 무겁다는 말을 안내 맨 앞에 얹는다', async () => {
+    const table = await readTableFile(sizedFile('제법큰표.csv', 200 * MB, 'a,b\n1,2'))
+    expect(table.rowCount).toBe(1)
+    expect(table.notices[0]?.level).toBe('warning')
+    expect(table.notices[0]?.message).toContain('200MB')
+  })
+
+  it('JSON 경로도 같은 말을 얹는다 — 안전장치가 확장자마다 다르면 안 된다', async () => {
+    const table = await readTableFile(sizedFile('제법큰표.json', 200 * MB, '[{"a":1}]'))
+    expect(table.notices[0]?.message).toContain('200MB')
+  })
+
+  it('경고선 아래면 크기 이야기를 꺼내지 않는다', async () => {
+    const table = await readTableFile(sizedFile('보통표.csv', 7 * MB, 'a,b\n1,2'))
+    expect(table.notices.some((notice) => notice.message.includes('MB'))).toBe(false)
+  })
+})

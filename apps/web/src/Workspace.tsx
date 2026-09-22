@@ -29,6 +29,7 @@ import {
   readModelFile,
   readTextFile,
   sampleCsv,
+  DEFAULT_PCA,
   startPca,
   startTableRead,
   toViewModel,
@@ -41,6 +42,7 @@ import {
   type PcaResult,
   type TableJob,
   type ViewModel,
+  type LoadProgress,
 } from '@holo/data'
 import type { EffectLevel } from '@holo/holo-fx'
 import type { HandTrackingStatus } from '@holo/input'
@@ -52,6 +54,7 @@ import {
   FileDropZone,
   ModelView,
   PointCloudView,
+  ProgressBar,
   TableView,
   TextPanel,
   type ModelDisplayMode,
@@ -216,7 +219,7 @@ function ModelPanel({ model, onClose }: { model: LoadedModel; onClose: () => voi
 /** 임베딩을 줄이는 계산이 어디까지 갔는지. 표 이름을 달아 지난 표의 결과를 걸러 낸다. */
 type Reduction =
   | { kind: 'idle' }
-  | { kind: 'running'; assetId: string }
+  | { kind: 'running'; assetId: string; progress: LoadProgress | null }
   | { kind: 'done'; assetId: string; result: PcaResult }
   | { kind: 'failed'; assetId: string }
 
@@ -242,9 +245,17 @@ export function Workspace() {
       setReduction({ kind: 'idle' })
       return
     }
-    setReduction({ kind: 'running', assetId })
-    const job = startPca(vector)
+    setReduction({ kind: 'running', assetId, progress: null })
     let alive = true
+    const job = startPca(vector, DEFAULT_PCA, (progress) => {
+      // 지난 표의 계산이 늦게 알려 와도 지금 막대를 건드리지 않는다.
+      if (!alive) return
+      setReduction((current) =>
+        current.kind === 'running' && current.assetId === assetId
+          ? { ...current, progress }
+          : current,
+      )
+    })
     void job.result
       .then((result) => {
         if (alive) setReduction({ kind: 'done', assetId, result })
@@ -474,6 +485,14 @@ export function Workspace() {
     setTextAsset(null)
     setCamera(null)
     setHovered(null)
+    /*
+     * 읽으면서 남긴 경고를 띄운다. 파일이 무겁다는 말도, 벡터로 못 묶은 컬럼 이야기도
+     * 여기로 온다. 지금까지 표의 안내는 만들어만 두고 아무 데도 보여 주지 않았다 —
+     * 말하지 않는 경고는 없는 것과 같다. 자산마다 제자리를 주는 일은 뷰 레지스트리가
+     * 들어오는 M5 몫이고, 그때까지는 3D 자리 아래 한 줄을 쓴다.
+     */
+    const warnings = table.notices.filter((one) => one.level === 'warning')
+    setNotice(warnings.length === 0 ? null : warnings.map((one) => one.message).join(' '))
     run({ kind: 'select', label: `자산 열기 · ${label}`, next: () => new Map() })
   }, [])
 
@@ -968,6 +987,12 @@ export function Workspace() {
           ) : model.position === null ? (
             <div className="holo-stage-empty">
               <p>{model.positionMissing}</p>
+              {model.positionPending ? (
+                <ProgressBar
+                  progress={reduction.kind === 'running' ? reduction.progress : null}
+                  idleLabel="차원 줄이는 중"
+                />
+              ) : null}
               <p className="holo-caption">
                 {model.positionPending
                   ? '계산은 화면 밖에서 돕니다. 그동안에도 표와 분포 그래프는 만질 수 있습니다.'

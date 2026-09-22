@@ -9,8 +9,10 @@ import {
   startTableRead,
   supportedLabels,
   type Asset,
+  type LoadProgress,
   type TableJob,
 } from '@holo/data'
+import { ProgressBar } from './ProgressBar'
 
 /**
  * 파일을 끌어다 놓는 자리 — 대표 사용 흐름의 1단계.
@@ -39,7 +41,9 @@ const ACCEPT = FORMATS.filter((format) => format.planned === undefined)
   .join(',')
 
 type Phase =
-  { kind: 'idle' } | { kind: 'reading'; fileName: string } | { kind: 'error'; message: string }
+  | { kind: 'idle' }
+  | { kind: 'reading'; fileName: string; progress: LoadProgress | null }
+  | { kind: 'error'; message: string }
 
 export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
@@ -58,7 +62,16 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
       reading.current?.cancel()
       latest.current += 1
       const ticket = latest.current
-      setPhase({ kind: 'reading', fileName: file.name })
+      setPhase({ kind: 'reading', fileName: file.name, progress: null })
+
+      /*
+       * 소식이 늦게 와서 다음 파일의 막대를 움직이는 일이 없어야 한다. 표를 갈아
+       * 끼울 때 지난 워커가 아직 한두 번 더 알려 오기 때문이다.
+       */
+      const tell = (progress: LoadProgress) => {
+        if (latest.current !== ticket) return
+        setPhase((current) => (current.kind === 'reading' ? { ...current, progress } : current))
+      }
 
       try {
         const kind = await kindOfFile(file)
@@ -85,7 +98,7 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
           asset = await asTextAsset()
         } else {
           // 종류를 모르는 파일도 표 읽개로 보낸다. 거기서 까닭 있는 오류가 나온다.
-          const job = startTableRead(file)
+          const job = startTableRead(file, {}, tell)
           reading.current = job
           try {
             const table = await job.result
@@ -176,7 +189,7 @@ export function FileDropZone({ onLoaded, compact = false }: FileDropZoneProps) {
         onChange={onPicked}
       />
       {phase.kind === 'reading' ? (
-        <p className="holo-drop-title">'{phase.fileName}' 읽는 중…</p>
+        <ProgressBar progress={phase.progress} title={`'${phase.fileName}'`} />
       ) : (
         <>
           <p className="holo-drop-title">{compact ? '다른 파일 열기' : '파일을 끌어다 놓으세요'}</p>

@@ -133,3 +133,45 @@ describe('noticesOfModel', () => {
     expect(noticesOfModel(base).some((one) => one.level === 'warning')).toBe(false)
   })
 })
+
+describe('readModelFile 크기 안전장치', () => {
+  const MB = 1024 * 1024
+
+  it('거부선을 넘는 모델은 바이트를 읽어 보지도 않고 막는다', async () => {
+    let opened = false
+    const file: ReadableBinaryFile = {
+      name: '거대한.glb',
+      size: 700 * MB,
+      text: async () => '',
+      arrayBuffer: async () => {
+        opened = true
+        return new ArrayBuffer(0)
+      },
+    }
+    await expect(readModelFile(file)).rejects.toThrow(UnsupportedFileError)
+    expect(opened).toBe(false)
+  })
+
+  it('경고선을 넘으면 열되 무겁다는 말을 안내 맨 앞에 얹는다', async () => {
+    const buffer = glbOf(cube)
+    const model = await readModelFile({
+      name: '제법큰.glb',
+      size: 200 * MB,
+      text: async () => '',
+      arrayBuffer: async () => buffer,
+    })
+    expect(model.notices[0]?.level).toBe('warning')
+    expect(model.notices[0]?.message).toContain('200MB')
+  })
+
+  it('표보다 너그럽다 — 같은 크기가 표는 막히고 모델은 열린다', async () => {
+    const buffer = glbOf(cube)
+    const model = await readModelFile({
+      name: '오백.glb',
+      size: 500 * MB,
+      text: async () => '',
+      arrayBuffer: async () => buffer,
+    })
+    expect(model.summary.meshes).toBe(1)
+  })
+})

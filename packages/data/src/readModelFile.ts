@@ -13,6 +13,7 @@
 import { assetIdOfFile, type FileIdentity } from './assetId'
 import { readGlb, readGltfJson, summarizeGltf, type GltfFormat, type GltfSummary } from './gltf'
 import type { LoadNotice } from './loadTable'
+import { checkFileSize, sizeNotices } from './sizeGuard'
 import { UnsupportedFileError } from './unsupported'
 
 export type LoadedModel = {
@@ -93,6 +94,13 @@ export async function readModelFile(file: ReadableBinaryFile): Promise<LoadedMod
   const extension = extensionOf(file.name)
   const format: GltfFormat = extension === 'gltf' ? 'gltf' : 'glb'
 
+  /*
+   * 크기를 먼저 본다. 메시와 텍스처는 결국 GPU로 올라가고 그 버퍼는 파일 크기와
+   * 대체로 같다. 넘치면 브라우저가 컨텍스트를 잃고 3D 화면이 통째로 까매진다.
+   */
+  const size = checkFileSize(file.name, file.size, 'model')
+  if (size.level === 'block') throw new UnsupportedFileError(file.name, size.message)
+
   try {
     const bytes = await file.arrayBuffer()
     const chunks =
@@ -112,7 +120,7 @@ export async function readModelFile(file: ReadableBinaryFile): Promise<LoadedMod
       format,
       bytes,
       summary,
-      notices: noticesOfModel(summary),
+      notices: [...sizeNotices(size), ...noticesOfModel(summary)],
     }
   } catch (error) {
     if (error instanceof UnsupportedFileError) {

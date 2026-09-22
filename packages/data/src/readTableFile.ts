@@ -12,6 +12,8 @@ import { buildTable, type BuildOptions, type LoadNotice, type LoadedTable } from
 import { loadDelimitedText } from './loadTable'
 import { splitLines } from './readTextFile'
 import { looksLikeLog, looksLikeMarkdown } from './textFlavor'
+import { progressOf } from './progress'
+import { checkFileSize, formatBytes, sizeNotices } from './sizeGuard'
 import { PreferTextError, UnsupportedFileError } from './unsupported'
 import { vectorFromLists, type VectorColumn } from './vectorColumn'
 
@@ -164,12 +166,44 @@ export async function readTableFile(
   const planned = plannedMessage(file.name)
   if (planned !== null) throw new UnsupportedFileError(file.name, planned)
 
+  /*
+   * 크기를 읽기 전에 본다. 표는 파일 전체를 자바스크립트 문자열로 풀어야 하는데,
+   * 그 한계에 부딪히면 브라우저가 오류를 주는 것이 아니라 탭이 죽는다. 죽은 뒤에는
+   * 무엇 때문이었는지 말할 자리도 없다.
+   */
+  const size = checkFileSize(file.name, file.size, 'table')
+  if (size.level === 'block') {
+    /*
+     * `.txt`처럼 표인지 글인지 모르는 파일은 막지 않고 글자로 보낸다. 글자 패널은
+     * 앞 32MB만 떼어다 풀어서 크기에 걸리지 않으므로, 기가바이트짜리 로그도 앞부분은
+     * 읽힌다. 막아 버리면 그 흔한 파일이 통째로 열리지 않는다.
+     */
+    if (isAmbiguous(extension)) {
+      throw new PreferTextError(
+        file.name,
+        `${formatBytes(file.size ?? 0)}라 표로 읽기에는 너무 큽니다. 앞부분만 글자로 펼쳐 보여 줍니다.`,
+      )
+    }
+    throw new UnsupportedFileError(file.name, size.message)
+  }
+
+  /** 무거운 파일이라는 말을 표의 안내 맨 앞에 얹는다. 경고는 여는 일을 세우지 않는다. */
+  const tell = (table: LoadedTable): LoadedTable =>
+    size.level === 'warn' ? { ...table, notices: [...sizeNotices(size), ...table.notices] } : table
+
   // 파일에서 뽑은 id를 아래로 내려 보낸다. 같은 파일을 다시 열면 같은 값이 나온다.
   const withId: BuildOptions = { ...options, assetId: assetIdOfFile(file) }
 
+  /*
+   * 바이트를 글자로 푸는 일에는 중간이 없다. `File.text()`는 다 되거나 안 되거나고,
+   * 7MB짜리면 여기서만 1초 가까이 머문다. 잴 수 없다고 조용히 있으면 그 1초가 통째로
+   * 빈 화면이 되므로, 단계 이름만이라도 먼저 띄운다.
+   */
+  options.onProgress?.(progressOf('reading', null))
+
   if (extension === 'json') {
     try {
-      return loadJson(await file.text(), withId)
+      return tell(loadJson(await file.text(), withId))
     } catch (error) {
       if (error instanceof PreferTextError) throw new PreferTextError(file.name, error.message)
       throw new UnsupportedFileError(
@@ -180,7 +214,7 @@ export async function readTableFile(
   }
   if (extension === 'jsonl' || extension === 'ndjson') {
     try {
-      return loadJsonLines(await file.text(), withId)
+      return tell(loadJsonLines(await file.text(), withId))
     } catch (error) {
       throw new UnsupportedFileError(
         file.name,
@@ -209,7 +243,7 @@ export async function readTableFile(
     if (table.columns.length === 1 && table.vectors.length === 0 && isAmbiguous(extension)) {
       throw new PreferTextError(file.name, '컬럼이 하나뿐이라 글자로 펼쳐 보여 줍니다.')
     }
-    return table
+    return tell(table)
   }
 
   throw new UnsupportedFileError(
