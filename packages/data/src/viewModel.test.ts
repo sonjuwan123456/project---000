@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildTable } from './loadTable'
 import { loadDelimitedText } from './loadTable'
 import { pcaTo3D } from './pca'
+import { umapTo3D } from './umap'
 import { toViewModel, vectorToReduce } from './viewModel'
 
 function csv(lines: readonly string[]) {
@@ -181,7 +182,7 @@ describe('줄이는 계산을 워커에 맡길 때', () => {
     if (vector === null) return
     const model = toViewModel(table, '시험.csv', {
       awaitingReduction: true,
-      reduced: pcaTo3D(vector),
+      reduced: { method: 'pca', result: pcaTo3D(vector) },
     })
     expect(model.positionPending).toBe(false)
     expect(model.position?.axes).toEqual(['PC1', 'PC2', 'PC3'])
@@ -189,6 +190,23 @@ describe('줄이는 계산을 워커에 맡길 때', () => {
     expect([...(model.position?.x ?? [])]).toEqual([
       ...(toViewModel(table, '시험.csv').position?.x ?? []),
     ])
+  })
+
+  it('UMAP으로 줄인 결과를 넘기면 축 이름과 안내가 UMAP 쪽으로 간다', () => {
+    const table = embeddingTable()
+    const vector = vectorToReduce(table)
+    expect(vector).not.toBeNull()
+    if (vector === null) return
+    const model = toViewModel(table, '시험.csv', {
+      awaitingReduction: true,
+      reduced: { method: 'umap', result: umapTo3D(vector) },
+    })
+
+    expect(model.position?.axes).toEqual(['UMAP1', 'UMAP2', 'UMAP3'])
+    // UMAP 축에는 설명력이라는 값이 없다. 주성분 쪽 문구가 새어 나오면 안 된다.
+    expect(model.position?.derivedFrom).toContain('UMAP으로')
+    expect(model.position?.derivedFrom).not.toContain('설명력')
+    expect(model.position?.derivedFrom).not.toContain('주성분')
   })
 
   it('숫자 컬럼으로 좌표가 서면 기다리라고 해도 기다리지 않는다', () => {

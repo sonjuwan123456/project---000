@@ -30,7 +30,9 @@ import {
   readTextFile,
   sampleCsv,
   DEFAULT_PCA,
+  DEFAULT_UMAP,
   startPca,
+  startUmap,
   startTableRead,
   toViewModel,
   vectorToReduce,
@@ -39,8 +41,10 @@ import {
   type LoadedModel,
   type LoadedTable,
   type LoadedText,
-  type PcaResult,
+  type Reduced,
   type TableJob,
+  type VectorColumn,
+  type ProgressReporter,
   type ViewModel,
   type LoadProgress,
 } from '@holo/data'
@@ -237,8 +241,42 @@ function ModelPanel({ model, onClose }: { model: LoadedModel; onClose: () => voi
 type Reduction =
   | { kind: 'idle' }
   | { kind: 'running'; assetId: string; progress: LoadProgress | null }
-  | { kind: 'done'; assetId: string; result: PcaResult }
+  | { kind: 'done'; assetId: string; result: Reduced }
   | { kind: 'failed'; assetId: string }
+
+/** 화면에서 고를 수 있는 줄이기 방법. */
+const REDUCTION_METHODS: readonly { value: ReductionMethod; label: string }[] = [
+  { value: 'pca', label: '주성분' },
+  { value: 'umap', label: 'UMAP' },
+]
+
+/** 화면에서 고를 수 있는 줄이기 방법. */
+type ReductionMethod = 'pca' | 'umap'
+
+/**
+ * 고른 방법으로 줄이기를 시작한다.
+ *
+ * 두 계산은 결과 모양이 다르다(주성분에는 설명력이 있고 UMAP에는 없다). 부르는 쪽이
+ * 그 차이를 몰라도 되게, 여기서 `Reduced` 하나로 맞춰 돌려준다.
+ */
+function startReduction(
+  method: ReductionMethod,
+  vector: VectorColumn,
+  onProgress: ProgressReporter,
+): { result: Promise<Reduced>; cancel(): void } {
+  if (method === 'umap') {
+    const job = startUmap(vector, DEFAULT_UMAP, onProgress)
+    return {
+      result: job.result.then((result): Reduced => ({ method: 'umap', result })),
+      cancel: () => job.cancel(),
+    }
+  }
+  const job = startPca(vector, DEFAULT_PCA, onProgress)
+  return {
+    result: job.result.then((result): Reduced => ({ method: 'pca', result })),
+    cancel: () => job.cancel(),
+  }
+}
 
 export function Workspace() {
   const [source, setSource] = useState<{ table: LoadedTable; label: string }>(() => ({
@@ -254,6 +292,11 @@ export function Workspace() {
    * 다른 표의 좌표를 그리면 안 된다.
    */
   const [reduction, setReduction] = useState<Reduction>({ kind: 'idle' })
+  /*
+   * 어느 방법으로 줄일지. 파일을 열자마자는 주성분으로 둔다 — 파라미터가 없고 빠르다.
+   * UMAP은 군집을 더 잘 갈라 놓지만 5만 행이면 분 단위라, 사용자가 고를 때만 돈다.
+   */
+  const [method, setMethod] = useState<ReductionMethod>('pca')
 
   useEffect(() => {
     const vector = vectorToReduce(source.table)
@@ -264,7 +307,7 @@ export function Workspace() {
     }
     setReduction({ kind: 'running', assetId, progress: null })
     let alive = true
-    const job = startPca(vector, DEFAULT_PCA, (progress) => {
+    const job = startReduction(method, vector, (progress) => {
       // 지난 표의 계산이 늦게 알려 와도 지금 막대를 건드리지 않는다.
       if (!alive) return
       setReduction((current) =>
@@ -285,7 +328,10 @@ export function Workspace() {
       alive = false
       job.cancel()
     }
-  }, [source.table])
+  }, [source.table, method])
+
+  /* 임베딩을 줄여야 좌표가 서는 표에서만 방법을 고르게 한다. 숫자 컬럼으로 선 좌표엔 뜻이 없다. */
+  const reducible = useMemo(() => vectorToReduce(source.table) !== null, [source.table])
 
   const model: ViewModel = useMemo(() => {
     const current = reduction.kind !== 'idle' && reduction.assetId === source.table.assetId
@@ -933,13 +979,32 @@ export function Workspace() {
               텍스트 닫기
             </button>
           ) : modelAsset === null ? (
-            <button
-              type="button"
-              className={'holo-chip' + (lasso ? ' is-on' : '')}
-              onClick={toggleLasso}
-            >
-              올가미 {lasso ? '켜짐' : '꺼짐'}
-            </button>
+            <>
+              <button
+                type="button"
+                className={'holo-chip' + (lasso ? ' is-on' : '')}
+                onClick={toggleLasso}
+              >
+                올가미 {lasso ? '켜짐' : '꺼짐'}
+              </button>
+              {reducible
+                ? REDUCTION_METHODS.map(({ value, label }) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className={'holo-chip' + (method === value ? ' is-on' : '')}
+                      onClick={() => setMethod(value)}
+                      title={
+                        value === 'umap'
+                          ? '이웃 관계를 지켜 군집을 갈라 놓는다. 행이 많으면 오래 걸린다.'
+                          : '곧은 축 셋에 비춘다. 빠르고 결과가 언제나 같다.'
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))
+                : null}
+            </>
           ) : (
             MODEL_MODES.map(({ mode, label }) => (
               <button

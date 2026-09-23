@@ -12,6 +12,7 @@
 import { MAX_COLORED_CATEGORIES, OVERFLOW_CATEGORY, type ColumnLookup } from '@holo/core'
 import type { LoadedCategoryColumn, LoadedColumn, LoadedTable } from './loadTable'
 import { pcaTo3D, type PcaResult } from './pca'
+import type { UmapResult } from './umap'
 import type { VectorColumn } from './vectorColumn'
 
 export type CellKind = 'text' | 'tag' | 'num'
@@ -195,18 +196,31 @@ function positionsFromSmallVector(vector: VectorColumn): Positions | null {
  * 축마다 퍼짐이 크게 다르므로(첫 축이 셋째 축의 몇 배다) 각 축을 따로 맞춘다.
  * 비율을 그대로 두면 구름이 납작한 판이 되어 돌려 봐도 안쪽이 안 보인다.
  */
-function positionsFromVector(vector: VectorColumn, reduced?: PcaResult): Positions | null {
-  const result = reduced ?? pcaTo3D(vector)
+function positionsFromVector(vector: VectorColumn, reduced?: Reduced): Positions | null {
+  const applied: Reduced = reduced ?? { method: 'pca', result: pcaTo3D(vector) }
+  const { result } = applied
   if (result.missingCount >= vector.rowCount) return null
-  const share = result.explained.map((value) => `${Math.round(value * 100)}%`).join(' · ')
+
+  /*
+   * UMAP 축에는 뜻이 없다. 주성분은 "이 축이 퍼짐의 몇 할을 설명한다"고 말할 수 있지만
+   * UMAP은 이웃 관계만 지키므로 축 하나를 따로 읽을 수 없다. 그래서 설명력도 붙이지 않는다.
+   */
+  const explained =
+    applied.method === 'pca'
+      ? ` (설명력 ${applied.result.explained.map((value) => `${Math.round(value * 100)}%`).join(' · ')})`
+      : ''
+  const how = applied.method === 'pca' ? '주성분 셋으로' : 'UMAP으로'
+  const axes: readonly [string, string, string] =
+    applied.method === 'pca' ? ['PC1', 'PC2', 'PC3'] : ['UMAP1', 'UMAP2', 'UMAP3']
+
   return {
     x: scaleAxis(result.x, vector.rowCount, AXIS_SPAN),
     y: scaleAxis(result.y, vector.rowCount, AXIS_SPAN * 0.7),
     z: scaleAxis(result.z, vector.rowCount, AXIS_SPAN),
     missing: result.missing,
     missingCount: result.missingCount,
-    axes: ['PC1', 'PC2', 'PC3'],
-    derivedFrom: `${vector.name} ${vector.dimension}차원을 주성분 셋으로 줄였습니다 (설명력 ${share})`,
+    axes,
+    derivedFrom: `${vector.name} ${vector.dimension}차원을 ${how} 줄였습니다${explained}`,
   }
 }
 
@@ -355,9 +369,19 @@ export function vectorToReduce(table: LoadedTable): VectorColumn | null {
   return vector
 }
 
+/**
+ * 워커가 줄여 둔 결과와, 무엇으로 줄였는지.
+ *
+ * 결과 모양이 둘로 갈리므로(주성분에는 설명력이 있고 UMAP에는 없다) 어느 쪽인지를
+ * 값에 달고 다닌다. 화면이 축 이름과 안내 문구를 여기서 가른다.
+ */
+export type Reduced =
+  | { readonly method: 'pca'; readonly result: PcaResult }
+  | { readonly method: 'umap'; readonly result: UmapResult }
+
 export type ViewModelOptions = {
   /** 워커가 이미 줄여 둔 결과. 있으면 이것으로 좌표를 만든다. */
-  readonly reduced?: PcaResult | null
+  readonly reduced?: Reduced | null
   /** true면 임베딩을 여기서 줄이지 않는다. 워커 결과를 기다리는 중이라는 뜻이다. */
   readonly awaitingReduction?: boolean
 }
@@ -396,7 +420,7 @@ export function toViewModel(
     position !== null
       ? null
       : positionPending && biggestVector !== null
-        ? `${biggestVector.name} ${biggestVector.dimension}차원을 주성분 셋으로 줄이고 있습니다.`
+        ? `${biggestVector.name} ${biggestVector.dimension}차원을 줄이고 있습니다.`
         : missingReason(table.vectors, numeric.length)
 
   /*
