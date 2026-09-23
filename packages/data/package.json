@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@holo/core": "workspace:*"
+    "@holo/core": "workspace:*",
+    "umap-js": "^1.4.0"
   }
 }

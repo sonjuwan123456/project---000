@@ -114,15 +114,23 @@ export { canUseWorker } from './workerSupport'
 export { startPca } from './pcaClient'
 export type { PcaJob } from './pcaClient'
 
+export { startUmap } from './umapClient'
+export type { UmapJob } from './umapClient'
+
+export { DEFAULT_UMAP, umapTo3D } from './umap'
+export type { UmapOptions, UmapResult } from './umap'
+
 export { startTableRead } from './tableClient'
 export type { TableJob } from './tableClient'
 
 export type { TableRequest, TableResponse, TableResult } from './tableWorker'
 
 export type { PcaRequest, PcaRequestOptions, PcaResponse, PcaWorkerResult } from './pcaWorker'
+export type { UmapRequest, UmapRequestOptions, UmapResponse, UmapWorkerResult } from './umapWorker'
 
 export { toViewModel, vectorToReduce } from './viewModel'
 export type {
+  Reduced,
   CategoryRole,
   CellKind,
   MeasureRole,
