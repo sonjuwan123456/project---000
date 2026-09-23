@@ -52,6 +52,13 @@ export type LoadedText = {
 /** 브라우저의 File이 그대로 들어맞는다. */
 export type ReadableTextFile = FileIdentity & {
   arrayBuffer(): Promise<ArrayBuffer>
+  /**
+   * 앞부분만 떼어 온다. `File.slice`가 그대로 맞는다.
+   *
+   * 없어도 읽기는 하지만, 있으면 큰 파일을 통째로 메모리에 올리지 않는다. 그 차이가
+   * 파일 크기 안전장치에서 글자 파일만 크기를 따지지 않는 까닭이다.
+   */
+  slice?(start?: number, end?: number): { arrayBuffer(): Promise<ArrayBuffer> }
 }
 
 const count = (value: number) => value.toLocaleString('ko-KR')
@@ -176,21 +183,36 @@ export async function readTextFile(
   file: ReadableTextFile,
   options: { forcedEncoding?: DetectedEncoding } = {},
 ): Promise<LoadedText> {
-  let whole: ArrayBuffer
+  /*
+   * 한계보다 큰 것이 이미 확실하면 앞부분만 떼어 온다. 통째로 올린 뒤에 자르면
+   * 자르기 전에 이미 기가바이트가 메모리에 얹혀서, 자르는 일 자체가 탭을 죽인다.
+   */
+  const known = file.size
+  const slice = typeof file.slice === 'function' ? file.slice.bind(file) : null
+  const headOnly = known !== undefined && known > TEXT_BYTE_LIMIT && slice !== null
+
+  let read: ArrayBuffer
   try {
-    whole = await file.arrayBuffer()
+    read =
+      headOnly && slice !== null
+        ? await slice(0, TEXT_BYTE_LIMIT).arrayBuffer()
+        : await file.arrayBuffer()
   } catch {
     throw new UnsupportedFileError(file.name, `'${file.name}'을(를) 읽지 못했습니다.`)
   }
 
-  let bytes = whole
-  if (whole.byteLength > TEXT_BYTE_LIMIT) {
+  // 앞부분만 떼어 왔으면 원본 크기는 파일이 말해 준 값이다. 잘렸다는 안내가 거기서 나온다.
+  const byteLength = headOnly ? (known ?? read.byteLength) : read.byteLength
+
+  let bytes = read
+  if (read.byteLength > TEXT_BYTE_LIMIT || headOnly) {
     // 자르는 자리가 글자 가운데면 UTF-8 감지가 통째로 빗나간다. 끊긴 꼬리를 먼저 뗀다.
-    const head = trimToUtf8Boundary(new Uint8Array(whole, 0, TEXT_BYTE_LIMIT))
-    bytes = whole.slice(0, head.byteLength)
+    const limit = Math.min(read.byteLength, TEXT_BYTE_LIMIT)
+    const head = trimToUtf8Boundary(new Uint8Array(read, 0, limit))
+    if (head.byteLength < read.byteLength) bytes = read.slice(0, head.byteLength)
   }
   return buildText({ assetId: assetIdOfFile(file), name: file.name }, bytes, {
     ...options,
-    byteLength: whole.byteLength,
+    byteLength,
   })
 }

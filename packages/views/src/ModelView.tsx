@@ -13,9 +13,10 @@ import {
   type Material,
   type WebGLRenderTarget,
 } from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { holoColors, type CameraDrive, type StoredCamera } from '@holo/core'
+import { disposeScene, parseGltf } from './gltfParse'
+
 import {
   maxPixelRatio,
   modelFragmentShader,
@@ -43,6 +44,13 @@ export type ModelDisplayMode = 'original' | 'hologram'
 export type ModelViewProps = {
   /** 원본 바이트. 이것이 바뀔 때만 다시 파싱한다. */
   bytes: ArrayBuffer
+  /**
+   * glTF가 가리키는 바깥 파일. 데이터층이 폴더·zip에서 찾아 온 것이다.
+   *
+   * 키는 glTF에 **적힌 그대로의 uri**다. three가 물어 올 때도 적힌 그대로 물어
+   * 오지만, 도구마다 `./`나 `%20`을 섞어 쓰므로 찾을 때 한 번 더 맞춰 본다.
+   */
+  resources?: ReadonlyMap<string, ArrayBuffer>
   mode: ModelDisplayMode
   effect: EffectLevel
   /** 되살릴 카메라. 첫 프레임에만 쓴다. */
@@ -74,30 +82,33 @@ type Parsed =
  * 것이 없기 때문이다. 바깥 파일을 가리키는 `.gltf`는 여기서 실패하는데, 데이터층이
  * 열기 전에 이미 그 사실을 세어 두었으므로 사람은 까닭을 먼저 읽는다.
  */
-function useParsedModel(bytes: ArrayBuffer): Parsed {
+function useParsedModel(
+  bytes: ArrayBuffer,
+  resources: ReadonlyMap<string, ArrayBuffer> | undefined,
+): Parsed {
   const [parsed, setParsed] = useState<Parsed>({ kind: 'loading' })
 
   useEffect(() => {
     let alive = true
     setParsed({ kind: 'loading' })
-    const loader = new GLTFLoader()
-    loader.parse(
-      bytes,
-      '',
-      (gltf) => {
-        if (!alive) return
-        setParsed({ kind: 'ready', root: gltf.scene })
+
+    const parsed = parseGltf(bytes, resources)
+    void parsed.scene.then(
+      (root) => {
+        if (alive) setParsed({ kind: 'ready', root })
       },
-      (error) => {
+      (error: unknown) => {
         if (!alive) return
         const detail = error instanceof Error ? error.message : String(error)
         setParsed({ kind: 'failed', message: `3D 모델을 푸는 중에 멈췄습니다. ${detail}` })
       },
     )
+    // 만든 Blob 주소는 우리가 거둬야 한다. 브라우저는 탭이 닫힐 때까지 쥐고 있다.
     return () => {
       alive = false
+      parsed.release()
     }
-  }, [bytes])
+  }, [bytes, resources])
 
   /*
    * 장면을 버릴 때 GPU 자원을 직접 돌려준다. three는 참조가 끊겨도 스스로 반납하지
@@ -106,28 +117,10 @@ function useParsedModel(bytes: ArrayBuffer): Parsed {
   useEffect(() => {
     if (parsed.kind !== 'ready') return
     const { root } = parsed
-    return () => {
-      root.traverse((object) => {
-        if (!(object instanceof Mesh)) return
-        object.geometry.dispose()
-        for (const material of toArray(object.material)) {
-          for (const value of Object.values(material)) {
-            // 재질이 쥔 텍스처는 이름이 제각각이라 값으로 가린다.
-            if (value !== null && typeof value === 'object' && 'isTexture' in value) {
-              ;(value as { dispose(): void }).dispose()
-            }
-          }
-          material.dispose()
-        }
-      })
-    }
+    return () => disposeScene(root)
   }, [parsed])
 
   return parsed
-}
-
-function toArray(material: Material | Material[]): Material[] {
-  return Array.isArray(material) ? material : [material]
 }
 
 /**
@@ -269,8 +262,8 @@ function Stage({
 }
 
 export function ModelView(props: ModelViewProps) {
-  const { bytes, mode, effect, camera, onCameraRest, drive, onStatus } = props
-  const parsed = useParsedModel(bytes)
+  const { bytes, resources, mode, effect, camera, onCameraRest, drive, onStatus } = props
+  const parsed = useParsedModel(bytes, resources)
   const controls = useRef<OrbitControlsHandle>(null)
   const start = camera?.position ?? DEFAULT_CAMERA
 

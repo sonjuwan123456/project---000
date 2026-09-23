@@ -24,5 +24,21 @@ export { TextPanel } from './TextPanel'
 export type { TextPanelProps } from './TextPanel'
 export { parseInline, parseMarkdown, safeHref } from './markdown'
 export type { MarkdownBlock, MarkdownSpan } from './markdown'
+export { ProgressBar } from './ProgressBar'
+export type { ProgressBarProps } from './ProgressBar'
 export { ModelView, fitToStage } from './ModelView'
 export type { ModelDisplayMode, ModelViewProps } from './ModelView'
+export { MAX_DROPPED_FILES, collectDropped, entriesOfPicked } from './fileEntries'
+export type { DroppedEntry, DroppedFiles } from './fileEntries'
+export {
+  THUMBNAIL_CAMERA,
+  THUMBNAIL_SIZE,
+  frameBox,
+  hasThumbnail,
+  thumbnailOf,
+  useThumbnail,
+} from './thumbnail'
+
+export { disposeScene, parseGltf } from './gltfParse'
+export { HIGHLIGHT_LINE_LIMIT, canHighlight, highlightLines, styleOf } from './highlight'
+export type { CodeToken } from './highlight'

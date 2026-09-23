@@ -11,6 +11,7 @@
 
 import { DEFAULT_PCA, pcaTo3D, type PcaOptions, type PcaResult } from './pca'
 import type { PcaRequest, PcaResponse } from './pcaWorker'
+import { progressOf, throttleProgress, type ProgressReporter } from './progress'
 import type { VectorColumn } from './vectorColumn'
 import { canUseWorker, transferable } from './workerSupport'
 
@@ -49,8 +50,20 @@ function inThisThread(vector: VectorColumn, options: PcaOptions): PcaJob {
  * 벡터는 한 벌 떠서 보낸다. 표가 들고 있는 버퍼를 그대로 넘기면 주 스레드에서
  * 떨어져 나가 표가 망가진다. 뜬 것은 넘겨 버려서 복사가 한 번으로 끝난다.
  */
-export function startPca(vector: VectorColumn, options: PcaOptions = DEFAULT_PCA): PcaJob {
-  if (!canUseWorker()) return inThisThread(vector, options)
+export function startPca(
+  vector: VectorColumn,
+  options: PcaOptions = DEFAULT_PCA,
+  onProgress?: ProgressReporter,
+): PcaJob {
+  if (!canUseWorker()) {
+    const report = onProgress === undefined ? undefined : throttleProgress(onProgress)
+    return inThisThread(vector, {
+      ...options,
+      ...(report === undefined
+        ? {}
+        : { onProgress: (fraction: number) => report(progressOf('reducing', fraction)) }),
+    })
+  }
 
   let worker: Worker
   try {
@@ -68,6 +81,11 @@ export function startPca(vector: VectorColumn, options: PcaOptions = DEFAULT_PCA
     worker.onmessage = (event: MessageEvent<PcaResponse>) => {
       const message = event.data
       if (message.id !== id) return
+      if ('kind' in message) {
+        // 멈춘 뒤에 늦게 온 소식으로 막대를 되살리지 않는다.
+        if (!done) onProgress?.(message.progress)
+        return
+      }
       done = true
       worker.terminate()
       if (!message.ok) {
@@ -100,7 +118,8 @@ export function startPca(vector: VectorColumn, options: PcaOptions = DEFAULT_PCA
     values,
     missing,
     missingCount: vector.missingCount,
-    options,
+    // onProgress는 함수라 싣지 못한다. 워커 쪽이 자기 것을 달아서 쓴다.
+    options: { fitSample: options.fitSample, iterations: options.iterations },
   }
   worker.postMessage(request, [transferable(values), transferable(missing)])
 

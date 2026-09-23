@@ -9,6 +9,7 @@
  */
 
 import { attachLookup, type BuildOptions, type LoadedTable } from './loadTable'
+import { throttleProgress, type ProgressReporter } from './progress'
 import {
   PreferTextError,
   UnsupportedFileError,
@@ -30,6 +31,7 @@ let nextId = 1
 function inThisThread(file: ReadableFile, options: BuildOptions): TableJob {
   let cancelled = false
   return {
+    // 워커가 없으면 본 스레드에서 돈다. 진행률은 그대로 흐르지만 화면은 어차피 굳는다.
     result: readTableFile(file, options).then((table) => {
       // 멈춘 뒤에는 결과를 흘리지 않는다. 끝나지 않는 약속이 된다.
       if (cancelled) return new Promise<LoadedTable>(() => {})
@@ -41,9 +43,25 @@ function inThisThread(file: ReadableFile, options: BuildOptions): TableJob {
   }
 }
 
-/** 파일 하나를 표로 읽는다. 읽기·파싱·종류 판별이 전부 워커에서 돈다. */
-export function startTableRead(file: ReadableFile, options: BuildOptions = {}): TableJob {
-  if (!canUseWorker()) return inThisThread(file, options)
+/**
+ * 파일 하나를 표로 읽는다. 읽기·파싱·종류 판별이 전부 워커에서 돈다.
+ *
+ * `onProgress`는 워커에서 오는 소식을 그대로 넘긴다. 본 스레드에서 도는 경우에도
+ * 같은 모양으로 오므로, 부르는 쪽은 어느 쪽이 돌았는지 몰라도 된다. 다만 본 스레드
+ * 쪽은 어차피 화면이 굳어 있어서 막대가 움직이는 것이 보이지는 않는다.
+ */
+export function startTableRead(
+  file: ReadableFile,
+  options: BuildOptions = {},
+  onProgress?: ProgressReporter,
+): TableJob {
+  if (!canUseWorker()) {
+    const report = onProgress === undefined ? undefined : throttleProgress(onProgress)
+    return inThisThread(file, {
+      ...options,
+      ...(report === undefined ? {} : { onProgress: report }),
+    })
+  }
 
   let worker: Worker
   try {
@@ -60,6 +78,11 @@ export function startTableRead(file: ReadableFile, options: BuildOptions = {}): 
     worker.onmessage = (event: MessageEvent<TableResponse>) => {
       const message = event.data
       if (message.id !== id) return
+      if ('kind' in message) {
+        // 멈춘 뒤에 늦게 온 소식으로 막대를 되살리지 않는다.
+        if (!done) onProgress?.(message.progress)
+        return
+      }
       done = true
       worker.terminate()
       if (message.ok) {

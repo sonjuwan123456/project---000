@@ -31,6 +31,13 @@ export type PcaOptions = {
   readonly fitSample: number
   /** 축 하나당 거듭제곱 반복 횟수. */
   readonly iterations: number
+  /**
+   * 진척을 알린다(0~1). 주지 않으면 아무것도 세지 않는다.
+   *
+   * 셀 수 있는 까닭은 일감이 처음부터 정해져 있어서다 — 축 셋 × 반복 횟수. 축 하나가
+   * 일찍 수렴해 빠져나가면 그만큼 건너뛰지만, 뒤로 가지는 않는다.
+   */
+  readonly onProgress?: (fraction: number) => void
 }
 
 export const DEFAULT_PCA: PcaOptions = { fitSample: 5000, iterations: 24 }
@@ -140,6 +147,7 @@ export function pcaTo3D(vector: VectorColumn, options: PcaOptions = DEFAULT_PCA)
 
     let strength = 0
     for (let step = 0; step < options.iterations; step += 1) {
+      options.onProgress?.((component * options.iterations + step) / (3 * options.iterations))
       // projected = X · v
       for (let index = 0; index < sample.length; index += 1) {
         const base = index * dimension

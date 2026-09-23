@@ -13,6 +13,8 @@
 import { assetIdOfFile, type FileIdentity } from './assetId'
 import { readGlb, readGltfJson, summarizeGltf, type GltfFormat, type GltfSummary } from './gltf'
 import type { LoadNotice } from './loadTable'
+import { resolveResources, type FileBundle } from './fileBundle'
+import { checkFileSize, sizeNotices } from './sizeGuard'
 import { UnsupportedFileError } from './unsupported'
 
 export type LoadedModel = {
@@ -29,6 +31,13 @@ export type LoadedModel = {
    */
   readonly bytes: ArrayBuffer
   readonly summary: GltfSummary
+  /**
+   * 묶음에서 찾아낸 바깥 파일. uri가 적힌 그대로 키다.
+   *
+   * GLB이거나 폴더 없이 파일 하나만 연 경우에는 비어 있다. 뷰가 three에게 상대
+   * 경로를 물어 올 때 이 표로 답한다.
+   */
+  readonly resources: ReadonlyMap<string, ArrayBuffer>
   readonly notices: readonly LoadNotice[]
 }
 
@@ -41,7 +50,11 @@ export type ReadableBinaryFile = FileIdentity & {
 const count = (value: number) => value.toLocaleString('ko-KR')
 
 /** 사람이 읽을 안내를 만든다. 무엇이 들었는지 하나, 모자란 것마다 하나씩. */
-export function noticesOfModel(summary: GltfSummary): LoadNotice[] {
+export function noticesOfModel(
+  summary: GltfSummary,
+  /** 묶음에서도 못 찾은 uri. 주지 않으면 바깥 파일을 하나도 못 찾은 것으로 본다. */
+  missing?: readonly string[],
+): LoadNotice[] {
   const notices: LoadNotice[] = [
     {
       level: 'info',
@@ -51,15 +64,34 @@ export function noticesOfModel(summary: GltfSummary): LoadNotice[] {
     },
   ]
 
-  if (summary.externalResources.length > 0) {
-    const shown = summary.externalResources.slice(0, 3).join(', ')
-    const rest = summary.externalResources.length - 3
+  /*
+   * 폴더나 zip으로 들어왔으면 바깥 파일을 이미 찾아 놨다. 그때는 못 찾은 것만
+   * 말한다. 다 찾았는데도 "빠진 채로 열립니다"를 띄우면 멀쩡한 화면을 두고 사람이
+   * 무엇이 잘못됐나 찾게 된다.
+   */
+  const total = summary.externalResources.length
+  const lost = missing ?? summary.externalResources
+  const foundCount = total - lost.length
+
+  if (foundCount > 0) {
+    notices.push({
+      level: 'info',
+      message: `바깥 파일 ${count(foundCount)}개를 같은 폴더에서 찾아 함께 열었습니다.`,
+    })
+  }
+
+  if (lost.length > 0) {
+    const shown = lost.slice(0, 3).join(', ')
+    const rest = lost.length - 3
     notices.push({
       level: 'warning',
       message:
-        `이 glTF는 바깥 파일 ${count(summary.externalResources.length)}개를 가리킵니다` +
+        `이 glTF가 가리키는 바깥 파일 ${count(lost.length)}개를 찾지 못했습니다` +
         `(${shown}${rest > 0 ? ` 외 ${count(rest)}개` : ''}). ` +
-        '떨어뜨린 파일 하나만 볼 수 있어서 그 부분은 빠진 채로 열립니다. ' +
+        '그 부분은 빠진 채로 열립니다. ' +
+        (foundCount > 0
+          ? '폴더에 같이 넣어 주시거나, '
+          : '파일 하나만 떨어뜨리면 딸린 파일은 볼 수 없습니다. 폴더째 넣어 주시거나, ') +
         '블렌더에서 glTF Binary(.glb)로 내보내면 한 파일에 담깁니다.',
     })
   }
@@ -89,9 +121,27 @@ function extensionOf(name: string): string {
   return dot === -1 ? '' : name.slice(dot + 1).toLowerCase()
 }
 
-export async function readModelFile(file: ReadableBinaryFile): Promise<LoadedModel> {
+export type ModelReadOptions = {
+  /**
+   * 이 파일이 들어 있던 묶음(폴더나 zip). 있으면 glTF가 가리키는 바깥 파일을
+   * 여기서 찾는다. 없으면 지금까지처럼 파일 하나만 읽는다.
+   */
+  readonly bundle?: FileBundle
+}
+
+export async function readModelFile(
+  file: ReadableBinaryFile,
+  options: ModelReadOptions = {},
+): Promise<LoadedModel> {
   const extension = extensionOf(file.name)
   const format: GltfFormat = extension === 'gltf' ? 'gltf' : 'glb'
+
+  /*
+   * 크기를 먼저 본다. 메시와 텍스처는 결국 GPU로 올라가고 그 버퍼는 파일 크기와
+   * 대체로 같다. 넘치면 브라우저가 컨텍스트를 잃고 3D 화면이 통째로 까매진다.
+   */
+  const size = checkFileSize(file.name, file.size, 'model')
+  if (size.level === 'block') throw new UnsupportedFileError(file.name, size.message)
 
   try {
     const bytes = await file.arrayBuffer()
@@ -106,13 +156,23 @@ export async function readModelFile(file: ReadableBinaryFile): Promise<LoadedMod
       )
     }
 
+    /*
+     * 바깥 파일을 묶음에서 찾는다. GLB는 가리키는 것이 없어서 이 일이 통째로
+     * 건너뛰어진다 — 흔한 쪽이 빠른 길이다.
+     */
+    const { found, missing } =
+      summary.externalResources.length === 0 || options.bundle === undefined
+        ? { found: new Map<string, ArrayBuffer>(), missing: [...summary.externalResources] }
+        : await resolveResources(options.bundle, summary.externalResources)
+
     return {
       assetId: assetIdOfFile(file),
       name: file.name,
       format,
       bytes,
       summary,
-      notices: noticesOfModel(summary),
+      resources: found,
+      notices: [...sizeNotices(size), ...noticesOfModel(summary, missing)],
     }
   } catch (error) {
     if (error instanceof UnsupportedFileError) {

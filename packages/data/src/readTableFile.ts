@@ -7,11 +7,15 @@
  */
 
 import { assetIdOfFile, type FileIdentity } from './assetId'
+import { ENCODING_LABELS, decodeText } from './encoding'
+
 import { extensionOf, plannedMessage, supportedLabels } from './formats'
 import { buildTable, type BuildOptions, type LoadNotice, type LoadedTable } from './loadTable'
 import { loadDelimitedText } from './loadTable'
 import { splitLines } from './readTextFile'
 import { looksLikeLog, looksLikeMarkdown } from './textFlavor'
+import { progressOf } from './progress'
+import { checkFileSize, formatBytes, sizeNotices } from './sizeGuard'
 import { PreferTextError, UnsupportedFileError } from './unsupported'
 import { vectorFromLists, type VectorColumn } from './vectorColumn'
 
@@ -150,9 +154,16 @@ export function prefersTextPanel(extension: string, text: string): boolean {
   return looksLikeLog(lines) || looksLikeMarkdown(lines)
 }
 
-/** 브라우저의 File을 그대로 받는다. 텍스트를 읽는 일만 밖에서 시킨다. */
+/**
+ * 브라우저의 File을 그대로 받는다. 읽는 일만 밖에서 시킨다.
+ *
+ * `arrayBuffer`가 있으면 그쪽으로 읽는다. `text()`는 무조건 UTF-8로 푸는데, 한국에서
+ * 오는 CSV는 EUC-KR인 일이 흔하고 그때 글자가 통째로 깨진다. 바이트로 받아야 무엇으로
+ * 적힌 파일인지 가려 볼 수 있다. 없는 자리(시험의 가짜 파일)에서는 `text()`로 물러선다.
+ */
 export type ReadableFile = FileIdentity & {
   text(): Promise<string>
+  arrayBuffer?(): Promise<ArrayBuffer>
 }
 
 export async function readTableFile(
@@ -164,12 +175,77 @@ export async function readTableFile(
   const planned = plannedMessage(file.name)
   if (planned !== null) throw new UnsupportedFileError(file.name, planned)
 
+  /*
+   * 크기를 읽기 전에 본다. 표는 파일 전체를 자바스크립트 문자열로 풀어야 하는데,
+   * 그 한계에 부딪히면 브라우저가 오류를 주는 것이 아니라 탭이 죽는다. 죽은 뒤에는
+   * 무엇 때문이었는지 말할 자리도 없다.
+   */
+  const size = checkFileSize(file.name, file.size, 'table')
+  if (size.level === 'block') {
+    /*
+     * `.txt`처럼 표인지 글인지 모르는 파일은 막지 않고 글자로 보낸다. 글자 패널은
+     * 앞 32MB만 떼어다 풀어서 크기에 걸리지 않으므로, 기가바이트짜리 로그도 앞부분은
+     * 읽힌다. 막아 버리면 그 흔한 파일이 통째로 열리지 않는다.
+     */
+    if (isAmbiguous(extension)) {
+      throw new PreferTextError(
+        file.name,
+        `${formatBytes(file.size ?? 0)}라 표로 읽기에는 너무 큽니다. 앞부분만 글자로 펼쳐 보여 줍니다.`,
+      )
+    }
+    throw new UnsupportedFileError(file.name, size.message)
+  }
+
+  /*
+   * 무엇으로 읽었는지. 아래 `readText`가 채우고 `tell`이 안내에 얹는다. 읽기 전에는
+   * 알 수 없는 값이라 미리 만들어 둘 수가 없고, `tell`은 언제나 읽은 뒤에 불린다.
+   */
+  let encodingNotices: LoadNotice[] = []
+
+  /**
+   * 파일을 글자로 푼다. 인코딩을 가려서.
+   *
+   * BOM을 떼어 주는 것도 여기서 따라온다. `text()`로 읽으면 BOM이 글자로 남아 첫 컬럼
+   * 이름이 보이지 않는 글자로 시작하고, 그 컬럼은 이름으로 찾아도 걸리지 않는다.
+   */
+  const readText = async (): Promise<string> => {
+    if (typeof file.arrayBuffer !== 'function') return await file.text()
+    const decoded = decodeText(await file.arrayBuffer())
+    /*
+     * CP949는 마지막으로 물러선 자리다 — UTF-8로 읽히지 않아서 고른 것이라, 맞았는지
+     * 우리는 모르고 사람은 화면을 보면 안다. 그래서 그때만 말한다. BOM이나 UTF-16은
+     * 파일이 스스로 밝힌 것이라 말할 것이 없다.
+     */
+    if (decoded.encoding === 'cp949') {
+      encodingNotices = [
+        {
+          level: 'warning',
+          message: `'${file.name}'은(는) UTF-8로 읽히지 않아 ${ENCODING_LABELS['cp949']}로 읽었습니다. 글자가 깨져 보이면 UTF-8로 다시 내보내 주세요.`,
+        },
+      ]
+    }
+    return decoded.text
+  }
+
+  /** 무거운 파일이라는 말을 표의 안내 맨 앞에 얹는다. 경고는 여는 일을 세우지 않는다. */
+  const tell = (table: LoadedTable): LoadedTable => {
+    const ahead = [...sizeNotices(size), ...encodingNotices]
+    return ahead.length === 0 ? table : { ...table, notices: [...ahead, ...table.notices] }
+  }
+
   // 파일에서 뽑은 id를 아래로 내려 보낸다. 같은 파일을 다시 열면 같은 값이 나온다.
   const withId: BuildOptions = { ...options, assetId: assetIdOfFile(file) }
 
+  /*
+   * 바이트를 글자로 푸는 일에는 중간이 없다. `File.text()`는 다 되거나 안 되거나고,
+   * 7MB짜리면 여기서만 1초 가까이 머문다. 잴 수 없다고 조용히 있으면 그 1초가 통째로
+   * 빈 화면이 되므로, 단계 이름만이라도 먼저 띄운다.
+   */
+  options.onProgress?.(progressOf('reading', null))
+
   if (extension === 'json') {
     try {
-      return loadJson(await file.text(), withId)
+      return tell(loadJson(await readText(), withId))
     } catch (error) {
       if (error instanceof PreferTextError) throw new PreferTextError(file.name, error.message)
       throw new UnsupportedFileError(
@@ -180,7 +256,7 @@ export async function readTableFile(
   }
   if (extension === 'jsonl' || extension === 'ndjson') {
     try {
-      return loadJsonLines(await file.text(), withId)
+      return tell(loadJsonLines(await readText(), withId))
     } catch (error) {
       throw new UnsupportedFileError(
         file.name,
@@ -189,7 +265,7 @@ export async function readTableFile(
     }
   }
   if (extension === 'csv' || extension === 'tsv' || extension === 'txt' || extension === '') {
-    const text = await file.text()
+    const text = await readText()
     if (prefersTextPanel(extension, text)) {
       throw new PreferTextError(file.name, '표가 아니라 글자로 보입니다. 텍스트 패널로 엽니다.')
     }
@@ -209,7 +285,7 @@ export async function readTableFile(
     if (table.columns.length === 1 && table.vectors.length === 0 && isAmbiguous(extension)) {
       throw new PreferTextError(file.name, '컬럼이 하나뿐이라 글자로 펼쳐 보여 줍니다.')
     }
-    return table
+    return tell(table)
   }
 
   throw new UnsupportedFileError(

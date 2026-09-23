@@ -38,7 +38,10 @@ const layerBoundaries = Object.entries(ALLOWED_DEPENDENCIES).map(([dir, allowed]
 })
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/coverage/**'] },
+  // 샘플은 코드가 아니라 데이터다. 문법 강조가 무엇을 갈라 주는지 보려고 둔 파일이라,
+  // 쓰지 않는 값이나 돌아가지 않는 조각이 일부러 들어 있다.
+  { ignores: ['**/dist/**', '**/coverage/**', 'samples/예시.*'] },
+
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

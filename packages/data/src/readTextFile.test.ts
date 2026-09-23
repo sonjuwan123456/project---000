@@ -176,3 +176,60 @@ describe('buildText', () => {
     expect(again.text).not.toBe(first.text)
   })
 })
+
+describe('readTextFile 큰 파일', () => {
+  it('한계보다 크면 앞부분만 떼어 온다 — 통째로 올리면 자르기 전에 죽는다', async () => {
+    const head = bytesOf('첫 줄\n둘째 줄\n')
+    let asked: [number | undefined, number | undefined] | null = null
+    const loaded = await readTextFile({
+      name: '거대한.log',
+      size: 4 * 1024 * TEXT_BYTE_LIMIT,
+      lastModified: 0,
+      arrayBuffer: async () => {
+        throw new Error('통째로 읽으면 안 된다')
+      },
+      slice: (start, end) => {
+        asked = [start, end]
+        return { arrayBuffer: async () => head }
+      },
+    })
+    expect(asked).toEqual([0, TEXT_BYTE_LIMIT])
+    expect(loaded.lines).toEqual(['첫 줄', '둘째 줄'])
+  })
+
+  it('떼어 온 것이라도 원본 크기로 잘렸다고 말한다', async () => {
+    const loaded = await readTextFile({
+      name: '거대한.log',
+      size: 100 * 1024 * 1024,
+      lastModified: 0,
+      arrayBuffer: async () => bytesOf(''),
+      slice: () => ({ arrayBuffer: async () => bytesOf('한 줄') }),
+    })
+    expect(loaded.truncated).toBe(true)
+    expect(loaded.byteLength).toBe(100 * 1024 * 1024)
+    expect(loaded.notices.some((notice) => notice.message.includes('100MB'))).toBe(true)
+  })
+
+  it('앞부분만 떼어 올 수 없으면 예전처럼 통째로 읽는다', async () => {
+    const loaded = await readTextFile(fileOf('보통.log', bytesOf('한 줄')))
+    expect(loaded.truncated).toBe(false)
+    expect(loaded.lines).toEqual(['한 줄'])
+  })
+
+  it('작은 파일은 떼어 오지 않는다 — 두 번 읽을 이유가 없다', async () => {
+    let sliced = false
+    const bytes = bytesOf('짧은 글')
+    const loaded = await readTextFile({
+      name: '짧은.log',
+      size: bytes.byteLength,
+      lastModified: 0,
+      arrayBuffer: async () => bytes,
+      slice: () => {
+        sliced = true
+        return { arrayBuffer: async () => bytes }
+      },
+    })
+    expect(sliced).toBe(false)
+    expect(loaded.truncated).toBe(false)
+  })
+})

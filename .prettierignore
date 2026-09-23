@@ -1,3 +1,5 @@
 dist/
 coverage/
 pnpm-lock.yaml
+samples/예시.ts
+samples/모형/scene.gltf
