@@ -117,7 +117,7 @@ export type { PcaJob } from './pcaClient'
 export { startUmap } from './umapClient'
 export type { UmapJob } from './umapClient'
 
-export { DEFAULT_UMAP, umapTo3D } from './umap'
+export { DEFAULT_UMAP, UMAP_MAX_ROWS, umapIsAffordable, umapTo3D } from './umap'
 export type { UmapOptions, UmapResult } from './umap'
 
 export { startTableRead } from './tableClient'

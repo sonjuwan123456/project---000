@@ -31,6 +31,8 @@ import {
   sampleCsv,
   DEFAULT_PCA,
   DEFAULT_UMAP,
+  UMAP_MAX_ROWS,
+  umapIsAffordable,
   startPca,
   startUmap,
   startTableRead,
@@ -298,8 +300,20 @@ export function Workspace() {
    */
   const [method, setMethod] = useState<ReductionMethod>('pca')
 
+  /* 임베딩을 줄여야 좌표가 서는 표에서만 방법을 고르게 한다. 숫자 컬럼으로 선 좌표엔 뜻이 없다. */
+  const vector = useMemo(() => vectorToReduce(source.table), [source.table])
+
+  /*
+   * 표가 기준보다 크면 UMAP을 내주지 않는다(`UMAP_MAX_ROWS`).
+   *
+   * 화면에서 칩만 막아서는 모자라다. 작은 표에서 UMAP을 골라 둔 채로 큰 파일을 열면
+   * 고른 값이 그대로 남아, 아무도 누르지 않았는데 몇 분짜리 계산이 시작된다. 그래서
+   * 실제로 돌릴 방법을 여기서 정하고, 칩은 그 결과를 비추기만 한다.
+   */
+  const umapTooBig = vector !== null && !umapIsAffordable(vector.rowCount)
+  const effectiveMethod: ReductionMethod = umapTooBig ? 'pca' : method
+
   useEffect(() => {
-    const vector = vectorToReduce(source.table)
     const { assetId } = source.table
     if (vector === null) {
       setReduction({ kind: 'idle' })
@@ -307,7 +321,7 @@ export function Workspace() {
     }
     setReduction({ kind: 'running', assetId, progress: null })
     let alive = true
-    const job = startReduction(method, vector, (progress) => {
+    const job = startReduction(effectiveMethod, vector, (progress) => {
       // 지난 표의 계산이 늦게 알려 와도 지금 막대를 건드리지 않는다.
       if (!alive) return
       setReduction((current) =>
@@ -328,10 +342,7 @@ export function Workspace() {
       alive = false
       job.cancel()
     }
-  }, [source.table, method])
-
-  /* 임베딩을 줄여야 좌표가 서는 표에서만 방법을 고르게 한다. 숫자 컬럼으로 선 좌표엔 뜻이 없다. */
-  const reducible = useMemo(() => vectorToReduce(source.table) !== null, [source.table])
+  }, [source.table, vector, effectiveMethod])
 
   const model: ViewModel = useMemo(() => {
     const current = reduction.kind !== 'idle' && reduction.assetId === source.table.assetId
@@ -987,22 +998,28 @@ export function Workspace() {
               >
                 올가미 {lasso ? '켜짐' : '꺼짐'}
               </button>
-              {reducible
-                ? REDUCTION_METHODS.map(({ value, label }) => (
-                    <button
-                      type="button"
-                      key={value}
-                      className={'holo-chip' + (method === value ? ' is-on' : '')}
-                      onClick={() => setMethod(value)}
-                      title={
-                        value === 'umap'
-                          ? '이웃 관계를 지켜 군집을 갈라 놓는다. 행이 많으면 오래 걸린다.'
-                          : '곧은 축 셋에 비춘다. 빠르고 결과가 언제나 같다.'
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))
+              {vector !== null
+                ? REDUCTION_METHODS.map(({ value, label }) => {
+                    const blocked = value === 'umap' && umapTooBig
+                    return (
+                      <button
+                        type="button"
+                        key={value}
+                        className={'holo-chip' + (effectiveMethod === value ? ' is-on' : '')}
+                        onClick={() => setMethod(value)}
+                        disabled={blocked}
+                        title={
+                          blocked
+                            ? `${UMAP_MAX_ROWS.toLocaleString('ko-KR')}행이 넘으면 UMAP은 분 단위로 걸려서 막아 두었다. 주성분으로 본다.`
+                            : value === 'umap'
+                              ? '이웃 관계를 지켜 군집을 갈라 놓는다. 행이 많으면 오래 걸린다.'
+                              : '곧은 축 셋에 비춘다. 빠르고 결과가 언제나 같다.'
+                        }
+                      >
+                        {label}
+                      </button>
+                    )
+                  })
                 : null}
             </>
           ) : (
@@ -1050,6 +1067,16 @@ export function Workspace() {
           </button>
         </div>
         {handNotice === null ? null : <p className="holo-notice">{handNotice}</p>}
+        {/*
+         * 왜 UMAP을 못 고르는지 화면에 적는다. 칩을 회색으로 만들어 두기만 하면 까닭은
+         * 툴팁에만 남는데, 손가락으로 쓰는 화면에는 툴팁이 없다.
+         */}
+        {textAsset === null && modelAsset === null && umapTooBig ? (
+          <p className="holo-notice is-quiet">
+            행이 {UMAP_MAX_ROWS.toLocaleString('ko-KR')}개를 넘어서 UMAP은 분 단위로 걸린다.
+            주성분으로 그린다.
+          </p>
+        ) : null}
       </header>
 
       <div className="holo-main">

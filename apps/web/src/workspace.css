@@ -452,6 +452,14 @@
   color: var(--holo-cat-4);
 }
 
+/*
+ * 잘못된 것이 없는 안내. 빨간 글씨는 무언가 깨졌다는 뜻으로 읽히는데, 행이 많아
+ * UMAP을 안 쓴다는 말은 고장이 아니라 알려 주는 말이다.
+ */
+.holo-notice.is-quiet {
+  color: var(--holo-dim);
+}
+
 /* 군집 라벨 */
 
 .holo-labels {
