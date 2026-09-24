@@ -18,6 +18,9 @@ function fakeDrive() {
     rest() {
       calls.push('rest')
     },
+    flyTo() {
+      calls.push('flyTo')
+    },
   }
   return { drive, calls, rotations, dollies }
 }

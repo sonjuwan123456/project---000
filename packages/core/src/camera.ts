@@ -1,3 +1,5 @@
+import type { StoredCamera } from './workspaceFile'
+
 /**
  * 카메라를 밖에서 움직이는 손잡이.
  *
@@ -15,4 +17,9 @@ export type CameraDrive = {
   dolly(delta: number): void
   /** 조작이 끝났다고 알린다. 이때 지금 카메라가 작업 공간에 저장된다. */
   rest(): void
+  /**
+   * 저장해 둔 자리로 날아간다(카메라 북마크). 도착하면 `rest`와 같이 알린다.
+   * 날아가는 중에 손이나 다른 비행이 들어오면 그 자리에서 멈추고 새 조작을 따른다.
+   */
+  flyTo(camera: StoredCamera): void
 }

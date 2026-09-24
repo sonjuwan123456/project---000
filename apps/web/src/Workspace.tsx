@@ -1,21 +1,45 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
+import {
+  BOOKMARKS_PER_ASSET,
+  DEFAULT_LAYOUT,
+  EMPTY_DOC,
+  LAYOUT_LIMITS,
+  addBookmark,
   applyCommand,
+  bookmarksOf,
   canUndo,
+  removeBookmark,
+  renameBookmark,
+  resizeLayout,
+  sameLayout,
   composeSelection,
   createWorkspaceState,
   fromWorkspaceFile,
   maskToRowIndices,
   parseWorkspaceFile,
   toWorkspaceFile,
+  type CameraBookmark,
   type Command,
   type DroppedClause,
+  type LayoutHandle,
   type RowMask,
   type SelectionClause,
   type SelectionClauses,
   type CameraDrive,
   type SelectionSource,
+  type RestoredWorkspace,
   type StoredCamera,
+  type WorkspaceDoc,
+  type WorkspaceFile,
   type WorkspaceState,
 } from '@holo/core'
 import {
@@ -56,22 +80,33 @@ import type { HandTrackingStatus } from '@holo/input'
 import { HandGestures } from './HandGestures'
 import {
   ActivityLog,
+  BookmarkList,
   CommandPalette,
   DistributionView,
   FileDropZone,
   ModelView,
   PointCloudView,
   ProgressBar,
+  Splitter,
   TableView,
   TextPanel,
+  arrangeViews,
   useThumbnail,
+  viewEntry,
+  viewsFor,
+  type AssetShape,
   type ModelDisplayMode,
   type PaletteCommand,
+  type ViewKind,
 } from '@holo/views'
 import { clearWorkspace, loadWorkspace, saveWorkspace } from './workspaceStore'
 
 /**
- * 작업 공간 — 세 뷰를 선택 코디네이터 하나로 묶는 곳.
+ * 작업 공간 — 뷰들을 선택 코디네이터 하나로 묶는 곳.
+ *
+ * 어떤 뷰를 어디에 띄울지는 뷰 레지스트리가 정한다(`viewsFor`, `arrangeViews`). 여기는
+ * 뷰마다 그리는 법만 쥔다(`renderers`). 칸 크기, 효과 강도, 카메라 북마크는 선택과 같은
+ * 작업 공간 문서에 들어 있어서 함께 저장되고 `Ctrl+Z`로 함께 되돌아간다.
  *
  * 뷰끼리는 서로를 부르지 않는다. 각자 조건을 발행하고 여기서 AND로 합친 결과만 받는다.
  * 3D 점 뷰는 합친 선택을 그대로 받아 강조하고, 표와 분포 그래프는 자기 조건을 뺀
@@ -124,6 +159,23 @@ const EFFECT_LABELS: ReadonlyArray<{ level: EffectLevel; label: string }> = [
 
 const count = (value: number) => value.toLocaleString('ko-KR')
 
+/** 입력칸에 글자를 치는 중인지. 그때는 한 글자 단축키(L, B, 1~9)와 Ctrl+Z를 입력칸에 양보한다. */
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  )
+}
+
+/** 칸 이름. 활동 기록과 화면 읽기 프로그램이 쓴다. */
+const HANDLE_LABELS: Record<LayoutHandle, string> = {
+  side: '옆 패널 폭',
+  bottom: '아래 표 높이',
+}
+
 /** 저장된 문자열을 효과 단계로 되돌린다. 모르는 값은 기본값으로 둔다. */
 function toEffectLevel(value: string): EffectLevel {
   return EFFECT_LABELS.some(({ level }) => level === value) ? (value as EffectLevel) : 'normal'
@@ -171,6 +223,27 @@ function droppedNotice(dropped: readonly DroppedClause[]): string | null {
   if (table > 0) parts.push(`고정 선택 ${table}개는 표가 달라 버림`)
   if (column > 0) parts.push(`조건 ${column}개는 그 컬럼이 지금 표에 없어 버림`)
   return parts.length === 0 ? null : parts.join(' · ')
+}
+
+/** 저장할 것이 있는 파일인지. 아무것도 바꾸지 않은 작업 공간은 저장하지 않는다. */
+function worthKeeping(file: WorkspaceFile): boolean {
+  return (
+    file.clauses.length > 0 ||
+    file.camera !== null ||
+    file.bookmarks.length > 0 ||
+    (file.layout !== null && !sameLayout(file.layout, DEFAULT_LAYOUT)) ||
+    file.effect !== EMPTY_DOC.effect
+  )
+}
+
+/** 파일에서 되살린 것을 문서에 얹는다. 파일에 배치가 없으면(옛 형식) 지금 배치를 둔다. */
+function restoredDoc(doc: WorkspaceDoc, restored: RestoredWorkspace): WorkspaceDoc {
+  return {
+    clauses: restored.clauses,
+    effect: toEffectLevel(restored.effect),
+    layout: restored.layout ?? doc.layout,
+    bookmarks: restored.bookmarks,
+  }
 }
 
 function pickedOf(clauses: SelectionClauses): number | null {
@@ -372,9 +445,18 @@ export function Workspace() {
 
   const [hovered, setHovered] = useState<number | null>(null)
   const [lasso, setLasso] = useState(false)
-  const [effect, setEffect] = useState<EffectLevel>('normal')
+  const effect = toEffectLevel(state.effect)
   const [palette, setPalette] = useState(false)
-  const [camera, setCamera] = useState<StoredCamera | null>(null)
+  const [camera, setCameraState] = useState<StoredCamera | null>(null)
+  /**
+   * 지금 카메라. 상태와 같은 값이지만 북마크를 남길 때는 렌더를 기다리지 않고 바로 읽어야
+   * 한다. 손잡이의 `rest()`가 지금 자리를 알려 오면 같은 순간에 여기 적힌다.
+   */
+  const cameraNow = useRef<StoredCamera | null>(null)
+  const setCamera = useCallback((next: StoredCamera | null) => {
+    cameraNow.current = next
+    setCameraState(next)
+  }, [])
   /** 저장된 작업 공간을 읽어 보기 전에는 아무것도 그리지 않는다. */
   const [ready, setReady] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -459,16 +541,15 @@ export function Workspace() {
     void loadWorkspace().then((file) => {
       if (!alive) return
       // 비어 있는 파일을 되살렸다고 알리면, 지운 사람에게 없던 일을 말하는 것이 된다.
-      if (file !== null && (file.clauses.length > 0 || file.camera !== null)) {
+      if (file !== null && worthKeeping(file)) {
         const restored = fromWorkspaceFile(file, restoreTarget)
         const lost = droppedNotice(restored.dropped)
-        setEffect(toEffectLevel(restored.effect))
         setCamera(restored.camera)
         run({
-          kind: 'select',
+          kind: 'edit',
           label:
             lost === null ? '저장된 작업 공간 되살리기' : `저장된 작업 공간 되살리기 · ${lost}`,
-          next: () => restored.clauses,
+          next: (doc) => restoredDoc(doc, restored),
         })
       }
       setReady(true)
@@ -478,18 +559,36 @@ export function Workspace() {
     }
   }, [])
 
-  // 조건이 바뀔 때마다 저장한다. 남기는 것은 조건과 카메라뿐이다.
+  /** 지금 작업 공간을 파일 모양으로. 저장과 내보내기가 같은 것을 쓴다. */
+  const snapshotFile = useCallback(
+    () =>
+      toWorkspaceFile(
+        {
+          clauses,
+          rowCount,
+          assetId: model.assetId,
+          camera,
+          effect: state.effect,
+          layout: state.layout,
+          bookmarks: state.bookmarks,
+        },
+        new Date(),
+      ),
+    // model이 빠지면 행이 같은 수인 다른 표로 갈아 끼웠을 때 예전 자산 id가 적힌다.
+    [clauses, rowCount, model, camera, state.effect, state.layout, state.bookmarks],
+  )
+
+  // 작업 공간이 바뀔 때마다 저장한다.
   useEffect(() => {
     if (!ready) return
+    const file = snapshotFile()
     // 남길 것이 없으면 빈 파일을 쓰지 않고 지운다. 그래야 "비우기"가 정말 비운 것이 된다.
-    if (clauses.size === 0 && camera === null) {
+    if (!worthKeeping(file)) {
       void clearWorkspace()
       return
     }
-    void saveWorkspace(
-      toWorkspaceFile({ clauses, rowCount, assetId: model.assetId, camera, effect }, new Date()),
-    )
-  }, [ready, clauses, rowCount, model, camera, effect])
+    void saveWorkspace(file)
+  }, [ready, snapshotFile])
 
   // 안내 문구는 잠깐만 보여 준다. 남은 기록은 활동 기록에 있다.
   useEffect(() => {
@@ -499,10 +598,7 @@ export function Workspace() {
   }, [notice])
 
   const exportWorkspace = useCallback(() => {
-    const file = toWorkspaceFile(
-      { clauses, rowCount, assetId: model.assetId, camera, effect },
-      new Date(),
-    )
+    const file = snapshotFile()
     const url = URL.createObjectURL(
       new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
     )
@@ -512,8 +608,7 @@ export function Workspace() {
     link.click()
     URL.revokeObjectURL(url)
     run({ kind: 'note', label: '작업 공간 내보내기' })
-    // model이 빠지면 행이 같은 수인 다른 표로 갈아 끼웠을 때 예전 자산 id가 적힌다.
-  }, [clauses, rowCount, model, camera, effect])
+  }, [snapshotFile])
 
   const importWorkspace = useCallback(
     async (blob: File) => {
@@ -533,24 +628,26 @@ export function Workspace() {
       }
       const restored = fromWorkspaceFile(parsed.file, restoreTarget)
       const lost = droppedNotice(restored.dropped)
-      setEffect(toEffectLevel(restored.effect))
       setCamera(restored.camera)
+      // 무대는 처음 뜰 때만 저장된 카메라에 앉는다. 이미 떠 있으면 그 자리로 날아가게 한다.
+      if (restored.camera !== null) drive.current?.flyTo(restored.camera)
       if (lost !== null) setNotice(`가져오지 못한 것 · ${lost}`)
       run({
-        kind: 'select',
+        kind: 'edit',
         label: `작업 공간 불러오기 · ${blob.name}`,
-        next: () => restored.clauses,
+        next: (doc) => restoredDoc(doc, restored),
       })
       // 예전 표의 restoreTarget으로 견주면 버릴 것과 남길 것을 거꾸로 고른다.
     },
-    [restoreTarget],
+    [restoreTarget, setCamera],
   )
 
+  /** 선택·효과·배치·북마크를 다 처음으로. 되돌리기로 돌아올 수 있다. */
   const forgetWorkspace = useCallback(() => {
     void clearWorkspace()
     setCamera(null)
-    run({ kind: 'select', label: '저장한 작업 공간 비우기', next: () => new Map() })
-  }, [])
+    run({ kind: 'edit', label: '저장한 작업 공간 비우기', next: () => EMPTY_DOC })
+  }, [setCamera])
 
   /**
    * 표를 갈아 끼울 때는 조건과 카메라를 같이 비운다. 이전 표의 올가미 선택이
@@ -730,14 +827,124 @@ export function Workspace() {
   }, [clauses.size])
 
   const setEffectLevel = useCallback((level: EffectLevel, label: string) => {
-    setEffect(level)
-    run({ kind: 'note', label: `효과 강도 · ${label}` })
+    run({ kind: 'edit', label: `효과 강도 · ${label}`, next: (doc) => ({ ...doc, effect: level }) })
   }, [])
 
   const setDisplayMode = useCallback((mode: ModelDisplayMode, label: string) => {
     setModelMode(mode)
     run({ kind: 'note', label: `표시 모드 · ${label}` })
   }, [])
+
+  /*
+   * 뷰 레지스트리에 자산 모양을 넘겨 띄울 뷰와 자리를 받는다. 좌표를 놓을 수 있는지는
+   * 좌표가 이미 있거나, 만드는 중이거나, 임베딩이 있어 만들려다 실패한 경우다. 마지막 경우도
+   * 무대를 남겨야 실패한 까닭을 거기서 말할 수 있다.
+   */
+  const shape: AssetShape =
+    textAsset !== null
+      ? { kind: 'text' }
+      : modelAsset !== null
+        ? { kind: 'model' }
+        : {
+            kind: 'table',
+            placeable:
+              model.position !== null || model.positionPending || source.table.vectors.length > 0,
+            chartable: model.category !== null || model.measure !== null,
+          }
+  const arrangement = arrangeViews(viewsFor(shape))
+
+  /*
+   * 무대에 오른 3D 자산. 북마크는 이 자산의 좌표계에 매인다. 무대가 3D가 아니면(글, 좌표
+   * 없는 표) 북마크를 남길 자리가 없다.
+   */
+  const stageAssetId =
+    arrangement.stage === 'model' && modelAsset !== null
+      ? modelAsset.assetId
+      : arrangement.stage === 'points' && model.position !== null
+        ? model.assetId
+        : null
+  const stageBookmarks = useMemo(
+    () => (stageAssetId === null ? [] : bookmarksOf(state.bookmarks, stageAssetId)),
+    [state.bookmarks, stageAssetId],
+  )
+  const bookmarksFull = stageBookmarks.length >= BOOKMARKS_PER_ASSET
+
+  const saveBookmark = useCallback(() => {
+    if (stageAssetId === null) return
+    // 손잡이에게 지금 자리를 알려 달라고 하면 cameraNow가 같은 순간에 채워진다.
+    drive.current?.rest()
+    const now = cameraNow.current
+    if (now === null) return
+    const next = addBookmark(state.bookmarks, stageAssetId, now)
+    if (next === null) {
+      setNotice(`북마크는 자산마다 ${BOOKMARKS_PER_ASSET}개까지다. 하나를 지우고 남긴다.`)
+      return
+    }
+    const added = next[next.length - 1]
+    run({
+      kind: 'edit',
+      label: `북마크 남기기 · ${added?.name ?? ''}`,
+      next: (doc) => ({ ...doc, bookmarks: next }),
+    })
+  }, [stageAssetId, state.bookmarks])
+
+  const flyToBookmark = useCallback((bookmark: CameraBookmark) => {
+    drive.current?.flyTo(bookmark.camera)
+    run({ kind: 'note', label: `북마크로 · ${bookmark.name}` })
+  }, [])
+
+  const dropBookmark = useCallback((bookmark: CameraBookmark) => {
+    run({
+      kind: 'edit',
+      label: `북마크 지우기 · ${bookmark.name}`,
+      next: (doc) => ({ ...doc, bookmarks: removeBookmark(doc.bookmarks, bookmark.id) }),
+    })
+  }, [])
+
+  const nameBookmark = useCallback((bookmark: CameraBookmark, name: string) => {
+    run({
+      kind: 'edit',
+      label: `북마크 이름 · ${bookmark.name} → ${name}`,
+      next: (doc) => ({ ...doc, bookmarks: renameBookmark(doc.bookmarks, bookmark.id, name) }),
+    })
+  }, [])
+
+  /*
+   * 칸 크기. 끄는 동안은 미리 보기만 들고 있다가 놓을 때 명령 하나로 적는다. 그래야
+   * 되돌리기 한 번이 끌기 한 번을 되돌린다.
+   */
+  const [dragging, setDragging] = useState<{ handle: LayoutHandle; delta: number } | null>(null)
+  const mainArea = useRef<HTMLDivElement>(null)
+  const bottomArea = useRef<HTMLElement>(null)
+  /** 무대와 아래 표가 나눠 쓰는 높이. 아래 손잡이의 픽셀을 비율로 바꾸는 데 쓴다. */
+  const verticalSpan = () =>
+    (mainArea.current?.getBoundingClientRect().height ?? 0) +
+    (bottomArea.current?.getBoundingClientRect().height ?? 0)
+  const layout =
+    dragging === null
+      ? state.layout
+      : resizeLayout(state.layout, dragging.handle, dragging.delta, verticalSpan())
+
+  const commitResize = useCallback((handle: LayoutHandle, delta: number) => {
+    setDragging(null)
+    const span = verticalSpan()
+    run({
+      kind: 'edit',
+      label: `패널 크기 · ${HANDLE_LABELS[handle]}`,
+      next: (doc) => ({ ...doc, layout: resizeLayout(doc.layout, handle, delta, span) }),
+    })
+  }, [])
+
+  const resetLayout = useCallback(() => {
+    if (sameLayout(state.layout, DEFAULT_LAYOUT)) return
+    run({
+      kind: 'edit',
+      label: '패널 크기 처음대로',
+      next: (doc) => ({ ...doc, layout: DEFAULT_LAYOUT }),
+    })
+  }, [state.layout])
+
+  const undo = useCallback(() => run({ kind: 'undo' }), [])
 
   const toggleLasso = useCallback(() => {
     setLasso((on) => {
@@ -824,16 +1031,46 @@ export function Workspace() {
       { group: '선택', label: '선택 해제', disabled: !hasSelection, run: clearAll },
       {
         group: '편집',
-        label: '되돌리기',
+        label: '되돌리기 (Ctrl+Z)',
         disabled: !canUndo(state),
         run: () => run({ kind: 'undo' } satisfies Command),
       },
       {
+        group: '배치',
+        label: '패널 크기 처음대로',
+        disabled: sameLayout(state.layout, DEFAULT_LAYOUT),
+        run: resetLayout,
+      },
+    ]
+    if (arrangement.stage === 'points') {
+      list.push({
         group: '뷰',
         label: `올가미 선택 ${lasso ? '끄기' : '켜기'}`,
         run: toggleLasso,
-      },
-    ]
+      })
+    }
+    if (stageAssetId !== null) {
+      list.push({
+        group: '북마크',
+        label: '지금 자리를 북마크로 남기기 (B)',
+        disabled: bookmarksFull,
+        run: saveBookmark,
+      })
+      stageBookmarks.forEach((bookmark, index) => {
+        list.push({
+          group: '북마크',
+          label: `북마크로 날아가기 · ${bookmark.name} (${index + 1})`,
+          run: () => flyToBookmark(bookmark),
+        })
+      })
+      for (const bookmark of stageBookmarks) {
+        list.push({
+          group: '북마크',
+          label: `북마크 지우기 · ${bookmark.name}`,
+          run: () => dropBookmark(bookmark),
+        })
+      }
+    }
     if (modelAsset !== null) {
       for (const { mode, label } of MODEL_MODES) {
         list.push({
@@ -903,23 +1140,57 @@ export function Workspace() {
     textAsset,
     closeText,
     openSample,
+    arrangement.stage,
+    stageAssetId,
+    stageBookmarks,
+    bookmarksFull,
+    saveBookmark,
+    flyToBookmark,
+    dropBookmark,
+    resetLayout,
   ])
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      const mod = event.ctrlKey || event.metaKey
+      const key = event.key.toLowerCase()
+      if (mod && key === 'k') {
         event.preventDefault()
         setPalette(true)
         return
       }
       // 팔레트가 열려 있으면 팔레트가 키를 맡는다. 입력란에 글자를 치는 중일 수도 있다.
       if (palette) return
+      // 입력칸 안의 Ctrl+Z는 친 글자를 되돌리는 것이다. 작업 공간을 되돌리면 안 된다.
+      if (isTyping(event.target)) return
+      if (mod && key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        undo()
+        return
+      }
+      if (mod || event.altKey) return
       if (event.key === 'Escape') clearAll()
-      if (event.key === 'l' || event.key === 'L') toggleLasso()
+      if (key === 'l' && arrangement.stage === 'points') toggleLasso()
+      if (key === 'b' && stageAssetId !== null) saveBookmark()
+      // 1~9는 그 번호 북마크로. 숫자 줄과 숫자 패드를 같이 받는다.
+      if (/^[1-9]$/.test(event.key)) {
+        const bookmark = stageBookmarks[Number(event.key) - 1]
+        if (bookmark !== undefined) flyToBookmark(bookmark)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [palette, clearAll, toggleLasso])
+  }, [
+    palette,
+    clearAll,
+    toggleLasso,
+    undo,
+    arrangement.stage,
+    stageAssetId,
+    stageBookmarks,
+    saveBookmark,
+    flyToBookmark,
+  ])
 
   const toggleHand = useCallback(() => {
     setHandNotice(null)
@@ -957,8 +1228,8 @@ export function Workspace() {
     [model],
   )
 
-  /** 무대가 화면을 통째로 쓰는 상태. 3D 모델과 글자 파일은 표·분포와 나란히 두지 않는다. */
-  const stageOnly = modelAsset !== null || textAsset !== null
+  /** 아래 칸이 비는 상태. 3D 모델·글이나, 표가 무대로 올라간 경우다. */
+  const stageOnly = arrangement.bottom.length === 0
 
   const hoveredText = hovered === null ? null : model.rowLabel(hovered)
   const hoveredSlot =
@@ -966,8 +1237,97 @@ export function Workspace() {
   const hoveredColor = model.category === null ? 0 : model.category.colorOfSlot(hoveredSlot)
   const hoveredName = hoveredSlot < 0 ? '' : (model.category?.names[hoveredSlot] ?? '')
 
+  /*
+   * 뷰마다 그리는 법. 어떤 뷰를 어디에 둘지는 레지스트리가 정하고, 여기는 받은 자리에
+   * 그리기만 한다. 레지스트리에 뷰를 더하면 이 표가 모자라 타입 검사가 멈춘다.
+   */
+  const renderers: Record<ViewKind, () => ReactNode> = {
+    points: () =>
+      model.position === null ? (
+        <div className="holo-stage-empty">
+          <p>{model.positionMissing}</p>
+          {model.positionPending ? (
+            <ProgressBar
+              progress={reduction.kind === 'running' ? reduction.progress : null}
+              idleLabel="차원 줄이는 중"
+            />
+          ) : null}
+          <p className="holo-caption">
+            {model.positionPending
+              ? '계산은 화면 밖에서 돕니다. 그동안에도 표와 분포 그래프는 만질 수 있습니다.'
+              : '표와 분포 그래프는 그대로 쓸 수 있습니다.'}
+          </p>
+        </div>
+      ) : (
+        <PointCloudView
+          rowCount={rowCount}
+          positions={model.position}
+          anchors={anchors}
+          colorOf={pointColorOf}
+          selected={everything.mask}
+          effect={effect}
+          lasso={lasso}
+          onHover={setHovered}
+          onLasso={onLasso}
+          camera={camera}
+          onCameraRest={setCamera}
+          drive={drive}
+        />
+      ),
+    model: () =>
+      modelAsset === null ? null : (
+        <ModelView
+          format={modelAsset.format}
+          bytes={modelAsset.bytes}
+          resources={modelAsset.resources}
+          mode={modelMode}
+          effect={effect}
+          camera={camera}
+          onCameraRest={setCamera}
+          drive={drive}
+          onStatus={onModelStatus}
+        />
+      ),
+    text: () =>
+      textAsset === null ? null : <TextPanel text={textAsset} onEncodingChange={changeEncoding} />,
+    table: () => (
+      <TableView
+        columns={model.columns}
+        rows={tableRows}
+        visibleCount={forTable.count}
+        hovered={hovered}
+        onHover={setHovered}
+        picked={picked}
+        onPick={onPickRow}
+      />
+    ),
+    distribution: () => (
+      <DistributionView
+        rowCount={rowCount}
+        category={model.category}
+        measure={model.measure}
+        visibleForCategories={forBars.mask}
+        visibleForMeasure={forHistogram.mask}
+        categories={categorySlots}
+        range={range}
+        onCategories={onCategories}
+        onRange={onRange}
+      />
+    ),
+  }
+
+  /*
+   * 칸 크기는 CSS 변수로 넘긴다. 좁은 화면에서는 CSS가 옆 패널을 아래로 내리고 이 값을
+   * 쓰지 않는다 — 폰에서 끌어 맞춘 폭이 넓은 화면에 따라오면 곤란하다.
+   */
+  const layoutStyle = {
+    '--holo-side': `${layout.side}px`,
+    '--holo-stage-share': `${1 - layout.bottom}fr`,
+    '--holo-bottom-share': `${layout.bottom}fr`,
+  } as CSSProperties
+
   return (
-    <main className={'holo-workspace' + (stageOnly ? ' is-stage-only' : '')}>
+    <main className={'holo-workspace' + (stageOnly ? ' is-stage-only' : '')} style={layoutStyle}>
       <header className="holo-header">
         <h1>홀로그램 데이터 뷰어</h1>
         <p className="holo-caption">
@@ -993,13 +1353,15 @@ export function Workspace() {
             </button>
           ) : modelAsset === null ? (
             <>
-              <button
-                type="button"
-                className={'holo-chip' + (lasso ? ' is-on' : '')}
-                onClick={toggleLasso}
-              >
-                올가미 {lasso ? '켜짐' : '꺼짐'}
-              </button>
+              {arrangement.stage === 'points' ? (
+                <button
+                  type="button"
+                  className={'holo-chip' + (lasso ? ' is-on' : '')}
+                  onClick={toggleLasso}
+                >
+                  올가미 {lasso ? '켜짐' : '꺼짐'}
+                </button>
+              ) : null}
               {vector !== null
                 ? REDUCTION_METHODS.map(({ value, label }) => {
                     const blocked = value === 'umap' && umapTooBig
@@ -1049,8 +1411,9 @@ export function Workspace() {
           <button
             type="button"
             className="holo-chip"
-            onClick={() => run({ kind: 'undo' })}
+            onClick={undo}
             disabled={!canUndo(state)}
+            title="Ctrl+Z"
           >
             되돌리기
           </button>
@@ -1081,53 +1444,9 @@ export function Workspace() {
         ) : null}
       </header>
 
-      <div className="holo-main">
+      <div className="holo-main" ref={mainArea}>
         <div className="holo-stage-slot">
-          {textAsset !== null ? (
-            <TextPanel text={textAsset} onEncodingChange={changeEncoding} />
-          ) : modelAsset !== null ? (
-            <ModelView
-              format={modelAsset.format}
-              bytes={modelAsset.bytes}
-              resources={modelAsset.resources}
-              mode={modelMode}
-              effect={effect}
-              camera={camera}
-              onCameraRest={setCamera}
-              drive={drive}
-              onStatus={onModelStatus}
-            />
-          ) : model.position === null ? (
-            <div className="holo-stage-empty">
-              <p>{model.positionMissing}</p>
-              {model.positionPending ? (
-                <ProgressBar
-                  progress={reduction.kind === 'running' ? reduction.progress : null}
-                  idleLabel="차원 줄이는 중"
-                />
-              ) : null}
-              <p className="holo-caption">
-                {model.positionPending
-                  ? '계산은 화면 밖에서 돕니다. 그동안에도 표와 분포 그래프는 만질 수 있습니다.'
-                  : '표와 분포 그래프는 그대로 쓸 수 있습니다.'}
-              </p>
-            </div>
-          ) : (
-            <PointCloudView
-              rowCount={rowCount}
-              positions={model.position}
-              anchors={anchors}
-              colorOf={pointColorOf}
-              selected={everything.mask}
-              effect={effect}
-              lasso={lasso}
-              onHover={setHovered}
-              onLasso={onLasso}
-              camera={camera}
-              onCameraRest={setCamera}
-              drive={drive}
-            />
-          )}
+          {arrangement.stage === null ? null : renderers[arrangement.stage]()}
           <p className="holo-readout">
             {busy !== null ? (
               <span className="holo-caption">{busy}을(를) 읽고 있습니다…</span>
@@ -1145,8 +1464,10 @@ export function Workspace() {
               </span>
             ) : hoveredText === null ? (
               <span className="holo-caption">
-                {model.position?.derivedFrom ??
-                  '점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.'}
+                {arrangement.stage === 'table'
+                  ? `${model.positionMissing ?? ''} 표와 분포 그래프로 본다.`.trim()
+                  : (model.position?.derivedFrom ??
+                    '점 위에 올리면 원문이 보인다. 올가미를 켜고 끌면 영역을 고른다.')}
               </span>
             ) : (
               <>
@@ -1161,20 +1482,38 @@ export function Workspace() {
           </p>
         </div>
 
+        <Splitter
+          orientation="vertical"
+          label={HANDLE_LABELS.side}
+          value={layout.side}
+          min={LAYOUT_LIMITS.side.min}
+          max={LAYOUT_LIMITS.side.max}
+          onMove={(delta) => setDragging(delta === 0 ? null : { handle: 'side', delta })}
+          onCommit={(delta) => commitResize('side', delta)}
+          onReset={resetLayout}
+        />
+
         <aside className="holo-side">
           <FileDropZone compact onLoaded={openAsset} />
           {modelAsset !== null ? <ModelPanel model={modelAsset} onClose={closeModel} /> : null}
-          {stageOnly ? null : (
-            <DistributionView
-              rowCount={rowCount}
-              category={model.category}
-              measure={model.measure}
-              visibleForCategories={forBars.mask}
-              visibleForMeasure={forHistogram.mask}
-              categories={categorySlots}
-              range={range}
-              onCategories={onCategories}
-              onRange={onRange}
+          {arrangement.side.map((kind) => (
+            <div key={kind} className="holo-side-view" data-view={viewEntry(kind).kind}>
+              {renderers[kind]()}
+            </div>
+          ))}
+          {stageAssetId === null ? null : (
+            <BookmarkList
+              bookmarks={stageBookmarks}
+              canAdd={!bookmarksFull}
+              addHint={
+                bookmarksFull
+                  ? `자산마다 ${BOOKMARKS_PER_ASSET}개까지다. 하나를 지우고 남긴다.`
+                  : null
+              }
+              onAdd={saveBookmark}
+              onFly={flyToBookmark}
+              onRemove={dropBookmark}
+              onRename={nameBookmark}
             />
           )}
           <ActivityLog entries={state.log} />
@@ -1182,17 +1521,25 @@ export function Workspace() {
       </div>
 
       {stageOnly ? null : (
-        <section className="holo-bottom">
-          <TableView
-            columns={model.columns}
-            rows={tableRows}
-            visibleCount={forTable.count}
-            hovered={hovered}
-            onHover={setHovered}
-            picked={picked}
-            onPick={onPickRow}
+        <>
+          <Splitter
+            orientation="horizontal"
+            label={HANDLE_LABELS.bottom}
+            value={layout.bottom * 100}
+            min={LAYOUT_LIMITS.bottom.min * 100}
+            max={LAYOUT_LIMITS.bottom.max * 100}
+            onMove={(delta) => setDragging(delta === 0 ? null : { handle: 'bottom', delta })}
+            onCommit={(delta) => commitResize('bottom', delta)}
+            onReset={resetLayout}
           />
-        </section>
+          <section className="holo-bottom" ref={bottomArea}>
+            {arrangement.bottom.map((kind) => (
+              <div key={kind} className="holo-bottom-view" data-view={kind}>
+                {renderers[kind]()}
+              </div>
+            ))}
+          </section>
+        </>
       )}
 
       <input

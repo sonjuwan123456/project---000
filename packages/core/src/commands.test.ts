@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyCommand, canUndo, createWorkspaceState, type Command } from './commands'
+import { EMPTY_DOC, applyCommand, canUndo, createWorkspaceState, type Command } from './commands'
 import type { SelectionClause, SelectionClauses } from './selection'
 
 const pick = (values: number[]): SelectionClause => ({
@@ -74,5 +74,55 @@ describe('applyCommand', () => {
     expect(state.history).toHaveLength(40)
     // 가장 오래된 칸이 아니라 가장 최근 40칸이 남아야 한다.
     expect(state.history[39]?.label).toBe('선택 60')
+  })
+
+  it('효과·배치·북마크를 바꾼 것도 한 칸씩 되돌아간다', () => {
+    let state = createWorkspaceState('열기', 1)
+    state = applyCommand(state, select('배송', pick([0])), 2)
+    state = applyCommand(
+      state,
+      {
+        kind: 'edit',
+        label: '효과 강도 · 가볍게',
+        next: (doc) => ({ ...doc, effect: 'performance' }),
+      },
+      3,
+    )
+    state = applyCommand(
+      state,
+      {
+        kind: 'edit',
+        label: '패널 크기',
+        next: (doc) => ({ ...doc, layout: { side: 420, bottom: 0.3 } }),
+      },
+      4,
+    )
+
+    expect(state.effect).toBe('performance')
+    expect(state.layout).toEqual({ side: 420, bottom: 0.3 })
+
+    state = applyCommand(state, { kind: 'undo' }, 5)
+    expect(state.layout).toEqual(EMPTY_DOC.layout)
+    // 되돌리기 한 번은 한 칸만 되돌린다. 효과 강도는 아직 그대로다.
+    expect(state.effect).toBe('performance')
+    expect(values(state.clauses)).toEqual([0])
+
+    state = applyCommand(state, { kind: 'undo' }, 6)
+    expect(state.effect).toBe('normal')
+    expect(values(state.clauses)).toEqual([0])
+  })
+
+  it('선택을 바꾸는 명령은 효과·배치·북마크를 건드리지 않는다', () => {
+    let state = createWorkspaceState('열기', 1)
+    state = applyCommand(
+      state,
+      { kind: 'edit', label: '효과', next: (doc) => ({ ...doc, effect: 'high' }) },
+      2,
+    )
+    state = applyCommand(state, select('배송', pick([0])), 3)
+    expect(state.effect).toBe('high')
+    state = applyCommand(state, { kind: 'undo' }, 4)
+    expect(state.effect).toBe('high')
+    expect(state.clauses.size).toBe(0)
   })
 })

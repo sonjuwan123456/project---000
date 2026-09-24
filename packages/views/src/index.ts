@@ -2,7 +2,7 @@
  * 시각화층. 뷰 레지스트리와 뷰 구현.
  *
  * 뷰는 서로를 모른다. 선택은 조건으로만 발행하고 합치는 일은 코디네이터가 한다.
- * 3D 모델 뷰가 M2에서 들어왔다. 뷰 레지스트리는 작업 공간을 붙이는 M5에서 채운다.
+ * 3D 모델 뷰가 M2에서, 뷰 레지스트리와 패널 표면이 M5에서 들어왔다.
  */
 export const PACKAGE_NAME = '@holo/views'
 
@@ -18,6 +18,30 @@ export { FileDropZone } from './FileDropZone'
 export type { FileDropZoneProps } from './FileDropZone'
 export { ClusterLabels } from './ClusterLabels'
 export type { ClusterLabelsProps } from './ClusterLabels'
+export { VIEW_REGISTRY, arrangeViews, viewEntry, viewsFor } from './viewRegistry'
+export type {
+  Arrangement,
+  AssetShape,
+  SelectionReaction,
+  ViewArea,
+  ViewAssetKind,
+  ViewEntry,
+  ViewKind,
+  ViewSurface,
+} from './viewRegistry'
+export { createPanelSurface, detectSurfaceSupport, surfaceKindFor } from './panelSurface'
+export type {
+  PanelSurface,
+  SurfaceKind,
+  SurfaceNode,
+  SurfacePlacement,
+  SurfacePoint,
+  SurfaceSupport,
+} from './panelSurface'
+export { Splitter } from './Splitter'
+export type { SplitterProps } from './Splitter'
+export { BookmarkList } from './BookmarkList'
+export type { BookmarkListProps } from './BookmarkList'
 export { ActivityLog } from './ActivityLog'
 export type { ActivityLogProps } from './ActivityLog'
 export { TextPanel } from './TextPanel'

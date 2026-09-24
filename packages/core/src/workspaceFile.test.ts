@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_LAYOUT, LAYOUT_LIMITS } from './layout'
 import type { SelectionClause, SelectionClauses } from './selection'
 import {
   WORKSPACE_FORMAT_VERSION,
@@ -23,6 +24,8 @@ const snapshot = (clauses: SelectionClauses, rowCount = ROWS, assetId: string | 
   assetId,
   camera: { position: [1, 2, 3] as const, target: [0, 0, 0] as const },
   effect: 'normal',
+  layout: DEFAULT_LAYOUT,
+  bookmarks: [],
 })
 
 const clausesOf = (...entries: [string, SelectionClause][]): SelectionClauses => new Map(entries)
@@ -327,5 +330,90 @@ describe('parseWorkspaceFile', () => {
       parseWorkspaceFile({ ...base, camera: { position: [1, 2], target: [0, 0, 0] } }).ok,
     ).toBe(false)
     expect(parseWorkspaceFile({ ...base, camera: { position: [1, 2, 3] } }).ok).toBe(false)
+  })
+
+  it('버전 3 전 파일은 배치를 모르는 것으로, 북마크는 빈 것으로 받는다', () => {
+    for (const version of [1, 2]) {
+      const parsed = parseWorkspaceFile({
+        version,
+        rowCount: ROWS,
+        clauses: [],
+        // 옛 버전에는 없던 값이다. 누가 적어 넣었어도 그 버전의 뜻대로 읽지 않는다.
+        layout: { side: 400, bottom: 0.3 },
+        bookmarks: 'nope',
+      })
+      expect(parsed.ok, `버전 ${version}`).toBe(true)
+      if (!parsed.ok) continue
+      expect(parsed.file.layout).toBeNull()
+      expect(parsed.file.bookmarks).toEqual([])
+    }
+  })
+
+  it('배치와 북마크를 그대로 주고받는다', () => {
+    const bookmark = {
+      id: 'b1',
+      name: '환불 군집',
+      assetId: 'file-1a2b3c4d',
+      camera: { position: [4, 5, 6] as const, target: [1, 0, 0] as const },
+    }
+    const file = toWorkspaceFile(
+      { ...snapshot(clausesOf()), layout: { side: 420, bottom: 0.3 }, bookmarks: [bookmark] },
+      savedAt,
+    )
+    const parsed = parseWorkspaceFile(JSON.parse(JSON.stringify(file)))
+
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.file.layout).toEqual({ side: 420, bottom: 0.3 })
+    expect(parsed.file.bookmarks).toEqual([bookmark])
+
+    // 다른 표 위에서 되살려도 북마크는 남는다. 그 자산을 다시 열면 쓸 것이다.
+    const restored = fromWorkspaceFile(parsed.file, target(ROWS + 1, 'other'))
+    expect(restored.bookmarks).toEqual([bookmark])
+    expect(restored.layout).toEqual({ side: 420, bottom: 0.3 })
+  })
+
+  it('범위를 벗어난 배치는 범위 안으로 넣어 받고, 망가진 배치는 거절한다', () => {
+    const base = { version: WORKSPACE_FORMAT_VERSION, rowCount: ROWS, clauses: [] }
+
+    const wide = parseWorkspaceFile({ ...base, layout: { side: 5000, bottom: 2 } })
+    expect(wide.ok).toBe(true)
+    if (wide.ok) {
+      expect(wide.file.layout).toEqual({
+        side: LAYOUT_LIMITS.side.max,
+        bottom: LAYOUT_LIMITS.bottom.max,
+      })
+    }
+    expect(parseWorkspaceFile({ ...base, layout: { side: '300', bottom: 0.4 } }).ok).toBe(false)
+    expect(parseWorkspaceFile({ ...base, layout: { side: 300 } }).ok).toBe(false)
+    expect(parseWorkspaceFile({ ...base, layout: 'wide' }).ok).toBe(false)
+  })
+
+  it('망가진 북마크가 섞이면 거절하고, id가 겹치면 뒤의 것을 버린다', () => {
+    const base = { version: WORKSPACE_FORMAT_VERSION, rowCount: ROWS, clauses: [] }
+    const good = {
+      id: 'b1',
+      name: '북마크 1',
+      assetId: 'a',
+      camera: { position: [1, 2, 3], target: [0, 0, 0] },
+    }
+    for (const broken of [
+      { ...good, id: '' },
+      { ...good, name: '   ' },
+      { ...good, assetId: 7 },
+      { ...good, camera: null },
+      { ...good, camera: { position: [1, 2, 3] } },
+      'b1',
+    ]) {
+      expect(parseWorkspaceFile({ ...base, bookmarks: [broken] }).ok).toBe(false)
+    }
+    expect(parseWorkspaceFile({ ...base, bookmarks: {} }).ok).toBe(false)
+
+    const twice = parseWorkspaceFile({
+      ...base,
+      bookmarks: [good, { ...good, name: '또' }],
+    })
+    expect(twice.ok).toBe(true)
+    if (twice.ok) expect(twice.file.bookmarks.map((one) => one.name)).toEqual(['북마크 1'])
   })
 })

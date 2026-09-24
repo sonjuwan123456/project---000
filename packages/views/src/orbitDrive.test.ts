@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { Vector3 } from 'three'
 import type { StoredCamera } from '@holo/core'
-import { DOLLY_RANGE, POLAR_MARGIN, createOrbitDrive, type OrbitLike } from './orbitDrive'
+import {
+  DOLLY_RANGE,
+  FLIGHT_MS,
+  POLAR_MARGIN,
+  createOrbitDrive,
+  type FrameClock,
+  type OrbitLike,
+} from './orbitDrive'
 
 function fakeOrbit(
   position: [number, number, number],
@@ -105,5 +112,157 @@ describe('createOrbitDrive', () => {
       drive.rest()
     }).not.toThrow()
     expect(seen).toEqual([])
+  })
+})
+
+/** 손으로 돌리는 시계. `tick`이 시간을 옮기고 기다리던 프레임 하나를 부른다. */
+function manualClock(reduced = false) {
+  let time = 0
+  let pending: (() => void) | null = null
+  let serial = 0
+  const clock: FrameClock = {
+    now: () => time,
+    request(step) {
+      pending = step
+      serial += 1
+      return serial
+    },
+    cancel() {
+      pending = null
+    },
+    reducedMotion: () => reduced,
+  }
+  return {
+    clock,
+    tick(ms: number) {
+      time += ms
+      const step = pending
+      pending = null
+      step?.()
+    },
+    flying: () => pending !== null,
+  }
+}
+
+describe('flyTo', () => {
+  const bookmark: StoredCamera = { position: [10, 4, 0], target: [2, 0, 0] }
+
+  it('정해진 시간에 걸쳐 날아가 닿고, 닿으면 한 번 알린다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    const seen: StoredCamera[] = []
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => rig,
+      (camera) => seen.push(camera),
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    time.tick(FLIGHT_MS / 2)
+    // 반쯤 왔을 때는 출발점과 도착점 사이 어딘가다.
+    expect(rig.object.position.x).toBeGreaterThan(0)
+    expect(rig.object.position.x).toBeLessThan(10)
+    expect(seen).toEqual([])
+
+    time.tick(FLIGHT_MS)
+    expect(rig.object.position.toArray()).toEqual([10, 4, 0])
+    expect(rig.target.toArray()).toEqual([2, 0, 0])
+    expect(seen).toEqual([bookmark])
+    expect(time.flying()).toBe(false)
+  })
+
+  it('움직임 줄이기를 켠 사람에게는 바로 옮긴다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    const seen: StoredCamera[] = []
+    const time = manualClock(true)
+    const drive = createOrbitDrive(
+      () => rig,
+      (camera) => seen.push(camera),
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    expect(rig.object.position.toArray()).toEqual([10, 4, 0])
+    expect(seen).toEqual([bookmark])
+    expect(time.flying()).toBe(false)
+  })
+
+  it('날아가는 중에 손이 돌리면 그 자리에서 멈춘다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    const seen: StoredCamera[] = []
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => rig,
+      (camera) => seen.push(camera),
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    time.tick(FLIGHT_MS / 4)
+    drive.rotate(0.1, 0)
+    expect(time.flying()).toBe(false)
+    // 멈춘 뒤에 시간이 가도 비행이 이어져 손을 거스르지 않는다.
+    const after = rig.object.position.clone()
+    time.tick(FLIGHT_MS)
+    expect(rig.object.position.equals(after)).toBe(true)
+    expect(seen).toEqual([])
+  })
+
+  it('날아가는 사이에 뷰가 닫히면 조용히 그만둔다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    let open = true
+    const seen: StoredCamera[] = []
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => (open ? rig : null),
+      (camera) => seen.push(camera),
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    open = false
+    expect(() => time.tick(FLIGHT_MS)).not.toThrow()
+    expect(seen).toEqual([])
+    expect(time.flying()).toBe(false)
+  })
+
+  it('날아가는 동안 관성을 끄고, 닿으면 되살린다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    rig.enableDamping = true
+    const seenDamping: (boolean | undefined)[] = []
+    const inner = rig.update
+    rig.update = () => {
+      seenDamping.push(rig.enableDamping)
+      inner()
+    }
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => rig,
+      () => {},
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    time.tick(FLIGHT_MS / 2)
+    time.tick(FLIGHT_MS)
+    expect(seenDamping.length).toBeGreaterThan(1)
+    expect(seenDamping.every((on) => on === false)).toBe(true)
+    expect(rig.enableDamping).toBe(true)
+  })
+
+  it('끼어들어 멈춰도 관성을 되살린다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    rig.enableDamping = true
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => rig,
+      () => {},
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    expect(rig.enableDamping).toBe(false)
+    drive.dolly(1)
+    expect(rig.enableDamping).toBe(true)
   })
 })
