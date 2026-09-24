@@ -13,14 +13,23 @@
  * 어느 표였는지는 `assetId`로 본다(버전 2에서 들어왔다). 행 수만으로는 행이 같은 수인
  * 다른 파일을 구별할 수 없다. `assetId`를 모르는 쪽이 있으면 예전처럼 행 수만 본다.
  *
- * 형식 버전을 맨 앞에 둔다. 옛 파일을 자동으로 변환할 자리를 미리 비워 두는 것이다.
+ * 형식 버전을 맨 앞에 둔다. 옛 파일은 읽을 때 지금 형식으로 바꿔 받는다.
+ *
+ * - 버전 1: 조건, 카메라, 효과 강도.
+ * - 버전 2: 자산 id가 들어왔다.
+ * - 버전 3: 패널 배치와 카메라 북마크가 들어왔다(M5). 옛 파일은 기본 배치와 빈 북마크로 받는다.
  */
+import type { CameraBookmark } from './bookmarks'
+import { clampLayout, type PanelLayout } from './layout'
 import type { SelectionClause, SelectionClauses, SelectionSource } from './selection'
 
-export const WORKSPACE_FORMAT_VERSION = 2
+export const WORKSPACE_FORMAT_VERSION = 3
 
 /** 버전 2부터 `assetId`가 있다. 그보다 옛 파일은 자산을 모르는 것으로 보고 받아들인다. */
 const OLDEST_READABLE_VERSION = 1
+
+/** 배치와 북마크가 들어온 버전. */
+const LAYOUT_VERSION = 3
 
 export type StoredCamera = {
   readonly position: readonly [number, number, number]
@@ -54,6 +63,9 @@ export type WorkspaceFile = {
   readonly camera: StoredCamera | null
   /** 뷰 명세에 해당하는 것 중 지금 있는 것 하나. */
   readonly effect: string
+  /** 버전 3 전 파일이면 null이다. 기본 배치로 연다. */
+  readonly layout: PanelLayout | null
+  readonly bookmarks: readonly CameraBookmark[]
 }
 
 export type WorkspaceSnapshot = {
@@ -63,6 +75,8 @@ export type WorkspaceSnapshot = {
   readonly assetId: string | null
   readonly camera: StoredCamera | null
   readonly effect: string
+  readonly layout: PanelLayout
+  readonly bookmarks: readonly CameraBookmark[]
 }
 
 /**
@@ -99,6 +113,10 @@ export type RestoredWorkspace = {
   readonly clauses: SelectionClauses
   readonly camera: StoredCamera | null
   readonly effect: string
+  /** 파일에 배치가 없었으면(버전 3 전) null. 부르는 쪽이 지금 배치를 그대로 둔다. */
+  readonly layout: PanelLayout | null
+  /** 북마크는 자산마다 매여 있어 표가 달라도 버리지 않는다. 그 자산을 열면 돌아온다. */
+  readonly bookmarks: readonly CameraBookmark[]
   readonly dropped: readonly DroppedClause[]
 }
 
@@ -119,6 +137,8 @@ export function toWorkspaceFile(snapshot: WorkspaceSnapshot, savedAt: Date): Wor
     clauses,
     camera: snapshot.camera,
     effect: snapshot.effect,
+    layout: snapshot.layout,
+    bookmarks: snapshot.bookmarks,
   }
 }
 
@@ -196,7 +216,14 @@ export function fromWorkspaceFile(file: WorkspaceFile, target: RestoreTarget): R
     })
   }
 
-  return { clauses, camera: file.camera, effect: file.effect, dropped }
+  return {
+    clauses,
+    camera: file.camera,
+    effect: file.effect,
+    layout: file.layout,
+    bookmarks: file.bookmarks,
+    dropped,
+  }
 }
 
 /**
@@ -258,6 +285,26 @@ export function parseWorkspaceFile(value: unknown): ParseResult {
   const effect = value['effect']
   const savedAt = value['savedAt']
 
+  // 버전 3 전 파일에는 둘 다 없다. 옛 파일은 읽지 않고 기본값으로 둔다. 버전 3에서도
+  // 빠져 있는 것은 받아 준다(사람이 줄여 쓴 파일). 있는데 모양이 틀리면 거른다.
+  let layout: PanelLayout | null = null
+  let bookmarks: CameraBookmark[] = []
+  if (version >= LAYOUT_VERSION) {
+    const parsedLayout = parseLayout(value['layout'])
+    if (parsedLayout === undefined) return fail('패널 배치 값이 잘못됐다.')
+    layout = parsedLayout
+    const rawBookmarks = value['bookmarks'] ?? []
+    if (!Array.isArray(rawBookmarks)) return fail('카메라 북마크 목록이 잘못됐다.')
+    for (const raw of rawBookmarks) {
+      const bookmark = parseBookmark(raw)
+      if (bookmark === null) return fail('알 수 없는 카메라 북마크가 섞여 있다.')
+      bookmarks.push(bookmark)
+    }
+    // 같은 id가 둘이면 하나를 지울 때 둘 다 지워진다. 뒤의 것을 버린다.
+    const seen = new Set<string>()
+    bookmarks = bookmarks.filter((one) => !seen.has(one.id) && seen.add(one.id))
+  }
+
   return {
     ok: true,
     file: {
@@ -268,8 +315,34 @@ export function parseWorkspaceFile(value: unknown): ParseResult {
       clauses,
       camera,
       effect: typeof effect === 'string' ? effect : 'normal',
+      layout,
+      bookmarks,
     },
   }
+}
+
+/** 값이 잘못되면 undefined, 없으면 null. 범위를 벗어난 값은 범위 안으로 넣어 받는다. */
+function parseLayout(raw: unknown): PanelLayout | null | undefined {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) return undefined
+  const side = raw['side']
+  const bottom = raw['bottom']
+  if (typeof side !== 'number' || !Number.isFinite(side)) return undefined
+  if (typeof bottom !== 'number' || !Number.isFinite(bottom)) return undefined
+  return clampLayout({ side, bottom })
+}
+
+function parseBookmark(raw: unknown): CameraBookmark | null {
+  if (!isRecord(raw)) return null
+  const id = raw['id']
+  const name = raw['name']
+  const assetId = raw['assetId']
+  if (typeof id !== 'string' || id === '') return null
+  if (typeof name !== 'string' || name.trim() === '') return null
+  if (typeof assetId !== 'string' || assetId === '') return null
+  const camera = parseCamera(raw['camera'])
+  if (camera === null || camera === undefined) return null
+  return { id, name: name.trim(), assetId, camera }
 }
 
 function parseClause(raw: unknown): StoredClause | null {

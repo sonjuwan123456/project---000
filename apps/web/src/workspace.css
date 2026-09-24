@@ -3,10 +3,20 @@
  * 값의 출처는 packages/core의 palette.ts 하나뿐이다.
  */
 
+/*
+ * 칸 크기는 작업 공간 문서의 배치 값이 CSS 변수로 들어온다(Workspace.tsx의 layoutStyle).
+ * 칸 사이 12px은 여백이자 끌어 잡는 손잡이다. 그래서 무대와 표 사이에는 grid gap을 두지 않고
+ * 손잡이 줄이 그 자리를 채운다.
+ */
 .holo-workspace {
+  --holo-side: 300px;
+  --holo-stage-share: 1fr;
+  --holo-bottom-share: 0.8fr;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 0.8fr);
-  gap: 12px;
+  grid-template-rows:
+    auto minmax(0, var(--holo-stage-share)) 12px
+    minmax(0, var(--holo-bottom-share));
+  row-gap: 0;
   height: 100%;
   padding: 16px;
 }
@@ -24,6 +34,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 8px 16px;
+  padding-bottom: 12px;
 }
 
 .holo-header h1 {
@@ -75,9 +86,56 @@
 
 .holo-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 12px var(--holo-side);
   min-height: 0;
+}
+
+/* 칸 사이 손잡이. 평소에는 여백처럼 보이고, 올리거나 초점이 가면 선이 드러난다. */
+.holo-splitter {
+  position: relative;
+  touch-action: none;
+}
+
+.holo-splitter.is-vertical {
+  cursor: col-resize;
+}
+
+.holo-splitter.is-horizontal {
+  cursor: row-resize;
+}
+
+.holo-splitter::after {
+  content: '';
+  position: absolute;
+  border-radius: 2px;
+  background: var(--holo-line);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.holo-splitter.is-vertical::after {
+  inset: 25% 5px;
+}
+
+.holo-splitter.is-horizontal::after {
+  inset: 5px 25%;
+}
+
+.holo-splitter:hover::after,
+.holo-splitter:active::after,
+.holo-splitter:focus-visible::after {
+  opacity: 1;
+  background: var(--holo-accent);
+}
+
+.holo-splitter:focus-visible {
+  outline: none;
+}
+
+/* 뷰 레지스트리가 앉힌 뷰를 감싸는 칸. 칸 자체는 배치에 끼어들지 않는다. */
+.holo-side-view,
+.holo-bottom-view {
+  display: contents;
 }
 
 .holo-side,
@@ -298,21 +356,36 @@
   text-align: right;
 }
 
-/* 좁은 화면에서는 옆 패널을 아래로 내린다. */
+/*
+ * 좁은 화면에서는 옆 패널을 아래로 내린다. 끌어 맞춘 칸 크기는 쓰지 않는다 — 넓은
+ * 화면에서 맞춘 폭이 폰에 그대로 오면 무대가 사라진다. 손잡이도 감춘다.
+ */
 @media (max-width: 900px) {
   .holo-workspace {
-    grid-template-rows: auto minmax(320px, 1fr) auto minmax(240px, 0.8fr);
+    grid-template-rows: auto auto minmax(240px, 0.8fr);
+    row-gap: 12px;
     padding: 16px;
+  }
+
+  .holo-workspace.is-stage-only {
+    grid-template-rows: auto auto;
   }
 
   .holo-main {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(320px, 60vh) auto;
+    gap: 12px;
+  }
+
+  .holo-splitter {
+    display: none;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .holo-bar-fill,
-  .holo-hist-bar {
+  .holo-hist-bar,
+  .holo-splitter::after {
     transition: none;
   }
 }
@@ -855,4 +928,74 @@
 .holo-markdown th {
   color: var(--holo-faint);
   font-weight: 400;
+}
+
+/* 카메라 북마크 */
+
+.holo-bookmark-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.holo-bookmark-list li {
+  display: grid;
+  grid-template-columns: 1.6em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.holo-bookmark-list kbd {
+  color: var(--holo-faint);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.68rem;
+  text-align: center;
+  border: 1px solid var(--holo-line);
+  border-radius: 4px;
+}
+
+.holo-bookmark-go,
+.holo-bookmark-name {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  padding: 3px 6px;
+  color: var(--holo-text);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.holo-bookmark-go {
+  cursor: pointer;
+}
+
+.holo-bookmark-go:hover {
+  border-color: var(--holo-line);
+  color: var(--holo-accent);
+}
+
+.holo-bookmark-name {
+  border-color: var(--holo-accent);
+  outline: none;
+}
+
+.holo-bookmark-remove {
+  border: 0;
+  background: transparent;
+  padding: 0 4px;
+  color: var(--holo-faint);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.holo-bookmark-remove:hover {
+  color: var(--holo-cat-2);
 }
