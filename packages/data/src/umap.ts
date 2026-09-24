@@ -51,6 +51,30 @@ export type UmapOptions = {
 /** G6은 아직 답이 없다. 화면에 손잡이를 내지 않고 이 값으로 고정해 둔다. */
 export const DEFAULT_UMAP: UmapOptions = { neighbors: 15, minDist: 0.1, seed: 0x9e3779b9 }
 
+/**
+ * 이 행 수를 넘으면 UMAP을 내주지 않는다.
+ *
+ * 이 컨테이너에서 64차원으로 재 본 값이다 — 1만 행 16초, 2만 행 42초, 5만 행 2분 22초.
+ * 표본 1만 개로 맞추고 나머지를 얹는 방법도 1분 22초라 크게 낫지 않았다. 기다림이
+ * 분 단위로 넘어가는 자리가 2만과 5만 사이에 있어서, 잴 수 있는 쪽 끝인 2만에 둔다.
+ *
+ * 막는 편이 낫다고 본 까닭은 취소할 방법이 마땅치 않아서다. 2분 동안 화면은 막대만
+ * 보여 주고, 그 사이 사용자는 멈춘 것인지 도는 것인지 알 길이 없다. 그보다는 처음부터
+ * 고를 수 없게 하고 왜인지 말해 주는 편이 낫다.
+ *
+ * 더 큰 표에서도 UMAP이 필요하다면 계산을 Rust WASM으로 옮기는 것이 다음 순서다.
+ */
+export const UMAP_MAX_ROWS = 20_000
+
+/**
+ * 이 표에 UMAP을 내줘도 되는지.
+ *
+ * 부르는 쪽이 기준값을 직접 견주지 않게 여기서 답한다. 기준이 바뀌면 이 파일만 고친다.
+ */
+export function umapIsAffordable(rowCount: number): boolean {
+  return rowCount <= UMAP_MAX_ROWS
+}
+
 /** 이웃 찾기가 차지하는 진행률 구간. 나머지는 반복이 채운다. */
 const KNN_SHARE = 0.2
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_UMAP, umapTo3D } from './umap'
+import { DEFAULT_UMAP, UMAP_MAX_ROWS, umapIsAffordable, umapTo3D } from './umap'
 import type { VectorColumn } from './vectorColumn'
 
 /**
@@ -166,5 +166,21 @@ describe('umapTo3D', () => {
     for (let index = 1; index < seen.length; index += 1) {
       expect(seen[index] ?? 0).toBeGreaterThanOrEqual(seen[index - 1] ?? 0)
     }
+  })
+})
+
+describe('얼마나 큰 표까지 UMAP을 내줄지', () => {
+  it('기준 행 수까지는 내주고 한 행이라도 넘으면 막는다', () => {
+    /*
+     * 경계를 양쪽에서 다 짚는다. 한쪽만 보면 부등호가 뒤집혀도 통과한다.
+     */
+    expect(umapIsAffordable(UMAP_MAX_ROWS - 1)).toBe(true)
+    expect(umapIsAffordable(UMAP_MAX_ROWS)).toBe(true)
+    expect(umapIsAffordable(UMAP_MAX_ROWS + 1)).toBe(false)
+  })
+
+  it('실제로 쟀을 때 분 단위였던 크기는 막는다', () => {
+    // 5만 행이 2분 22초였다. 이 숫자가 기준 위에 있지 않으면 기준을 잘못 고친 것이다.
+    expect(umapIsAffordable(50_000)).toBe(false)
   })
 })
