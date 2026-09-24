@@ -10,6 +10,11 @@ export type OrbitLike = {
   object: { position: Vector3 }
   target: Vector3
   update(): void
+  /**
+   * 관성. 켜져 있으면 손을 놓은 뒤에도 남은 회전이 몇 프레임 이어진다. 날아가는 동안
+   * 그 남은 회전이 도착점을 밀어내므로 잠시 끈다. 꺼진 채로 한 번 `update`하면 남은 것이 비워진다.
+   */
+  enableDamping?: boolean
 }
 
 /** 바로 위·아래를 넘어가면 화면이 뒤집힌다. 그 앞에서 멈춘다. */
@@ -56,8 +61,18 @@ export function createOrbitDrive(
   const spherical = new Spherical()
   /** 날고 있으면 그 프레임 번호. 손이 끼어들면 이것을 끊는다. */
   let flight: number | null = null
+  /** 날기 전 관성 설정. 날고 있지 않으면 undefined. */
+  let damping: { rig: OrbitLike; was: boolean } | undefined
+
+  /** 관성을 날기 전대로 돌려놓는다. */
+  function restoreDamping() {
+    if (damping === undefined) return
+    damping.rig.enableDamping = damping.was
+    damping = undefined
+  }
 
   function land() {
+    restoreDamping()
     if (flight === null) return
     clock.cancel(flight)
     flight = null
@@ -114,8 +129,15 @@ export function createOrbitDrive(
         position: [p.x, p.y, p.z],
         target: [rig.target.x, rig.target.y, rig.target.z],
       }
+      // 손을 막 놓은 뒤라면 남은 관성이 있다. 끄고 나서 옮겨야 도착점에 정확히 선다.
+      if (rig.enableDamping !== undefined) {
+        damping = { rig, was: rig.enableDamping }
+        rig.enableDamping = false
+        rig.update()
+      }
       if (clock.reducedMotion()) {
         place(rig, camera, 1, from)
+        restoreDamping()
         drive.rest()
         return
       }
@@ -125,6 +147,7 @@ export function createOrbitDrive(
         // 날아가는 사이에 뷰가 닫혔으면 조용히 그만둔다.
         if (!live) {
           flight = null
+          damping = undefined
           return
         }
         const t = clamp((clock.now() - start) / FLIGHT_MS, 0, 1)
@@ -134,6 +157,7 @@ export function createOrbitDrive(
           return
         }
         flight = null
+        restoreDamping()
         drive.rest()
       }
       flight = clock.request(step)

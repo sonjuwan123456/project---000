@@ -153,7 +153,11 @@
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
+/* 옆 칸에 쌓이는 것(파일 열기, 모델 정보, 그래프, 북마크, 활동 기록) 사이를 같은 간격으로 띄운다. */
 .holo-side {
+  display: grid;
+  align-content: start;
+  gap: 20px;
   padding: 14px;
   overflow-y: auto;
 }

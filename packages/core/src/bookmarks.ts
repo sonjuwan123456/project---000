@@ -34,8 +34,10 @@ export function bookmarksOf(
 /**
  * 북마크를 하나 더한다. 그 자산에 이미 가득 찼으면 null.
  *
- * 이름은 "북마크 N"으로 붙인다. N은 그 자산에서 비어 있는 가장 작은 번호다 — 2번을
- * 지우고 새로 만들면 다시 2번이 된다. 단축키 번호와 이름의 번호가 어긋나지 않게 하려는 것이다.
+ * 이름은 "북마크 N"으로 붙인다. 새 북마크는 목록 끝에 붙어 단축키가 (개수+1)번이 되므로
+ * N도 거기서 시작한다. 그래야 흔한 경우에 이름의 번호와 단축키 번호가 같다. 그 이름이 이미
+ * 있으면(지우고 다시 만든 경우) 다음 번호로 넘어간다. 앞에서부터 빈 번호를 채우면 이름을
+ * 하나 바꾼 뒤 새로 만든 것이 2번 자리에 "북마크 1"로 붙는다 — 브라우저로 보고 고쳤다.
  */
 export function addBookmark(
   bookmarks: readonly CameraBookmark[],
@@ -45,7 +47,7 @@ export function addBookmark(
   const mine = bookmarksOf(bookmarks, assetId)
   if (mine.length >= BOOKMARKS_PER_ASSET) return null
   const taken = new Set(mine.map((one) => one.name))
-  let number = 1
+  let number = mine.length + 1
   while (taken.has(`북마크 ${number}`)) number += 1
   const ids = new Set(bookmarks.map((one) => one.id))
   let serial = bookmarks.length + 1

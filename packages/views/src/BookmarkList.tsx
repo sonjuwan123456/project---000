@@ -72,7 +72,11 @@ export function BookmarkList(props: BookmarkListProps) {
                 <button
                   type="button"
                   className="holo-bookmark-go"
-                  onClick={() => onFly(bookmark)}
+                  // 두 번 누르기(이름 고치기)의 첫 번째 누름에만 날아간다. 두 번째까지 날면
+                  // 활동 기록에 같은 비행이 두 줄 남는다. 키보드로 누르면 detail이 0이다.
+                  onClick={(event) => {
+                    if (event.detail <= 1) onFly(bookmark)
+                  }}
                   onDoubleClick={() => setEditing(bookmark.id)}
                   title="누르면 날아가고, 두 번 누르면 이름을 고친다"
                 >

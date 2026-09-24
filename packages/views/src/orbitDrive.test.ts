@@ -225,4 +225,44 @@ describe('flyTo', () => {
     expect(seen).toEqual([])
     expect(time.flying()).toBe(false)
   })
+
+  it('날아가는 동안 관성을 끄고, 닿으면 되살린다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    rig.enableDamping = true
+    const seenDamping: (boolean | undefined)[] = []
+    const inner = rig.update
+    rig.update = () => {
+      seenDamping.push(rig.enableDamping)
+      inner()
+    }
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => rig,
+      () => {},
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    time.tick(FLIGHT_MS / 2)
+    time.tick(FLIGHT_MS)
+    expect(seenDamping.length).toBeGreaterThan(1)
+    expect(seenDamping.every((on) => on === false)).toBe(true)
+    expect(rig.enableDamping).toBe(true)
+  })
+
+  it('끼어들어 멈춰도 관성을 되살린다', () => {
+    const { rig } = fakeOrbit([0, 0, 20])
+    rig.enableDamping = true
+    const time = manualClock()
+    const drive = createOrbitDrive(
+      () => rig,
+      () => {},
+      time.clock,
+    )
+
+    drive.flyTo(bookmark)
+    expect(rig.enableDamping).toBe(false)
+    drive.dolly(1)
+    expect(rig.enableDamping).toBe(true)
+  })
 })

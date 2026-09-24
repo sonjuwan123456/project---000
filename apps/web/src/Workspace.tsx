@@ -1353,13 +1353,15 @@ export function Workspace() {
             </button>
           ) : modelAsset === null ? (
             <>
-              <button
-                type="button"
-                className={'holo-chip' + (lasso ? ' is-on' : '')}
-                onClick={toggleLasso}
-              >
-                올가미 {lasso ? '켜짐' : '꺼짐'}
-              </button>
+              {arrangement.stage === 'points' ? (
+                <button
+                  type="button"
+                  className={'holo-chip' + (lasso ? ' is-on' : '')}
+                  onClick={toggleLasso}
+                >
+                  올가미 {lasso ? '켜짐' : '꺼짐'}
+                </button>
+              ) : null}
               {vector !== null
                 ? REDUCTION_METHODS.map(({ value, label }) => {
                     const blocked = value === 'umap' && umapTooBig

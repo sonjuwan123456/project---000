@@ -29,12 +29,21 @@ describe('addBookmark', () => {
     expect(new Set(list.map((one) => one.id)).size).toBe(3)
   })
 
-  it('지운 번호를 다시 쓴다', () => {
+  it('이름의 번호는 새 북마크가 앉는 자리(단축키) 번호를 따른다', () => {
+    const one = addMany([], 'a', 1)
+    const first = one[0]
+    if (first === undefined) throw new Error('없다')
+    // 첫 것의 이름을 바꾼 뒤 새로 만들면 2번 자리다. "북마크 1"이 붙으면 단축키와 어긋난다.
+    const renamed = renameBookmark(one, first.id, '환불 군집')
+    expect(addBookmark(renamed, 'a', at(1))?.map((b) => b.name)).toEqual(['환불 군집', '북마크 2'])
+  })
+
+  it('그 이름이 이미 있으면 다음 번호로 넘어간다', () => {
     const list = addMany([], 'a', 3)
     const second = list[1]
     if (second === undefined) throw new Error('없다')
     const again = addBookmark(removeBookmark(list, second.id), 'a', at(9))
-    expect(again?.map((one) => one.name)).toEqual(['북마크 1', '북마크 3', '북마크 2'])
+    expect(again?.map((one) => one.name)).toEqual(['북마크 1', '북마크 3', '북마크 4'])
     expect(new Set(again?.map((one) => one.id)).size).toBe(3)
   })
 

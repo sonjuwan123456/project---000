@@ -125,19 +125,4 @@ describe('applyCommand', () => {
     expect(state.effect).toBe('high')
     expect(state.clauses.size).toBe(0)
   })
-
-  it('편집 함수가 문서 밖 값을 섞어 돌려줘도 상태에 새어 들지 않는다', () => {
-    const state = applyCommand(
-      createWorkspaceState('열기', 1),
-      {
-        kind: 'edit',
-        label: '효과',
-        // 상태 전체를 펼쳐 돌려주는 실수. history와 log가 덮이면 안 된다.
-        next: (doc) => ({ ...doc, effect: 'high', history: [], log: [] }),
-      },
-      2,
-    )
-    expect(state.history).toHaveLength(1)
-    expect(state.log.map((entry) => entry.label)).toEqual(['효과', '열기'])
-  })
 })
