@@ -169,6 +169,10 @@ describe('pickPrimary', () => {
     expect(pickPrimary(bundleFrom(['표.parquet', '표.csv']))?.path).toBe('표.csv')
   })
 
+  it('OBJ 폴더에서는 .mtl이 아니라 .obj를 연다', () => {
+    expect(pickPrimary(bundleFrom(['a.mtl', 'b.obj', 'textures/c.png']))?.path).toBe('b.obj')
+  })
+
   it('열 만한 것이 없으면 null', () => {
     expect(pickPrimary(bundleFrom(['a.bin', 'b.xyz']))).toBeNull()
   })

@@ -70,6 +70,12 @@ export type { LoadedModel, ReadableBinaryFile } from './readModelFile'
 export { looksLikeGlb, readGlb, readGltfJson, summarizeGltf } from './gltf'
 export type { GltfDocument, GltfFormat, GltfSummary } from './gltf'
 
+export { MODEL_FORMAT_LABELS } from './modelSummary'
+export type { ModelFormat, ModelSummary } from './modelSummary'
+
+export { summarizeObj, texturesOfMtl } from './wavefront'
+export { isBinaryStl, summarizeStl } from './stl'
+
 export {
   loadJson,
   loadJsonLines,

@@ -99,6 +99,12 @@ describe('plannedMessage', () => {
   it('읽을 수 있는 형식에는 없다', () => {
     expect(plannedMessage('표.csv')).toBeNull()
     expect(plannedMessage('큐브.glb')).toBeNull()
+    expect(plannedMessage('상자.obj')).toBeNull()
+    expect(plannedMessage('부품.stl')).toBeNull()
+  })
+
+  it('.mtl만 떨어뜨리면 .obj와 같이 넣으라고 한다', () => {
+    expect(plannedMessage('상자.mtl')).toMatch(/\.obj와 함께/)
   })
 
   it('모르는 확장자에도 없다', () => {
@@ -111,6 +117,9 @@ describe('supportedLabels', () => {
     const labels = supportedLabels()
     expect(labels).toContain('GLB')
     expect(labels).toContain('CSV·TSV')
+    expect(labels).toContain('OBJ')
+    expect(labels).toContain('STL')
+    expect(labels).not.toContain('MTL')
     expect(labels).not.toContain('Parquet')
     expect(labels).not.toContain('FBX')
   })

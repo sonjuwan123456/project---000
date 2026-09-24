@@ -31,6 +31,7 @@ import {
   sampleCsv,
   DEFAULT_PCA,
   DEFAULT_UMAP,
+  MODEL_FORMAT_LABELS,
   UMAP_MAX_ROWS,
   umapIsAffordable,
   startPca,
@@ -200,11 +201,12 @@ function ModelPanel({ model, onClose }: { model: LoadedModel; onClose: () => voi
   })
 
   const rows: [string, string][] = [
-    ['형식', model.format === 'glb' ? 'GLB' : 'glTF'],
+    ['형식', MODEL_FORMAT_LABELS[model.format]],
     ['메시', `${count(model.summary.meshes)}개`],
-    ['재질', `${count(model.summary.materials)}개`],
-    ['삼각형', `${count(model.summary.triangles)}개`],
   ]
+  // STL에는 재질이라는 것이 없다. "0개"라고 적으면 빠진 것처럼 읽힌다.
+  if (model.format !== 'stl') rows.push(['재질', `${count(model.summary.materials)}개`])
+  rows.push(['삼각형', `${count(model.summary.triangles)}개`])
   if (model.summary.textures > 0) rows.push(['텍스처', `${count(model.summary.textures)}개`])
   if (model.summary.generator !== null) rows.push(['만든 곳', model.summary.generator])
 
@@ -1085,9 +1087,9 @@ export function Workspace() {
             <TextPanel text={textAsset} onEncodingChange={changeEncoding} />
           ) : modelAsset !== null ? (
             <ModelView
+              format={modelAsset.format}
               bytes={modelAsset.bytes}
               resources={modelAsset.resources}
-
               mode={modelMode}
               effect={effect}
               camera={camera}

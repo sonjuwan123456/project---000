@@ -46,6 +46,21 @@ function resourceFor(
   return resources.get(url) ?? normalized.get(normalizePath(url))
 }
 
+/**
+ * 이름 하나로 바깥 파일을 찾는다. three를 거치지 않고 직접 읽어야 할 때 쓴다
+ * (OBJ가 가리키는 `.mtl`은 글자로 먼저 읽어야 재질을 세울 수 있다).
+ */
+export function findResource(
+  resources: ReadonlyMap<string, ArrayBuffer>,
+  url: string,
+): ArrayBuffer | undefined {
+  const exact = resources.get(url)
+  if (exact !== undefined) return exact
+  const key = normalizePath(url)
+  for (const [uri, buffer] of resources) if (normalizePath(uri) === key) return buffer
+  return undefined
+}
+
 /** 바깥 파일을 Blob 주소로 물려 주는 관리자와, 거둘 주소 목록. */
 export function managerFor(resources: ReadonlyMap<string, ArrayBuffer> | undefined): {
   manager: LoadingManager
