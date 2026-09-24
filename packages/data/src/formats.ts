@@ -45,9 +45,24 @@ export const FORMATS: readonly FormatEntry[] = [
   { id: 'json-lines', label: 'JSON Lines', kind: 'table', extensions: ['jsonl', 'ndjson'] },
   { id: 'gltf-binary', label: 'GLB', kind: 'model', extensions: ['glb'], sniff: looksLikeGlb },
   { id: 'gltf-json', label: 'glTF', kind: 'model', extensions: ['gltf'] },
+  { id: 'wavefront', label: 'OBJ', kind: 'model', extensions: ['obj'] },
+  { id: 'stl', label: 'STL', kind: 'model', extensions: ['stl'] },
   { id: 'log', label: '로그', kind: 'text', extensions: extensionsOfFlavor('log') },
   { id: 'markdown', label: '마크다운', kind: 'text', extensions: extensionsOfFlavor('markdown') },
   { id: 'code', label: '코드', kind: 'text', extensions: extensionsOfFlavor('code') },
+  {
+    /*
+     * 못 읽어서가 아니라 혼자서는 열 것이 없어서 `planned`를 단다. 그래야 폴더에서
+     * 이것을 고르지 않고(`pickPrimary`), 받는 형식 목록에도 끼지 않는다. 같이 온
+     * `.obj`가 이 파일을 가리키면 그때 읽힌다.
+     */
+    id: 'wavefront-material',
+    label: 'MTL',
+    kind: 'model',
+    extensions: ['mtl'],
+    planned:
+      'MTL은 OBJ의 재질만 적은 파일이라 혼자서는 열 것이 없습니다. .obj와 함께 폴더째 넣거나 zip으로 묶어 주세요.',
+  },
 
   // ── 아직 못 읽는 것들. M4 형식 확장이 순서대로 채운다. ──
   {
@@ -65,26 +80,12 @@ export const FORMATS: readonly FormatEntry[] = [
     planned: '엑셀 파일은 아직 읽지 못합니다. CSV로 내보내 주세요.',
   },
   {
-    id: 'wavefront',
-    label: 'OBJ',
-    kind: 'model',
-    extensions: ['obj', 'mtl'],
-    planned: 'OBJ는 아직 읽지 못합니다. GLB로 내보내면 지금도 열립니다.',
-  },
-  {
     id: 'filmbox',
     label: 'FBX',
     kind: 'model',
     extensions: ['fbx'],
     planned:
       'FBX는 아직 읽지 못합니다. GLB로 내보내 주세요. FBX는 재질과 애니메이션이 옮겨지다 깨지는 일이 잦아, 나중에 받더라도 GLB를 권합니다.',
-  },
-  {
-    id: 'stl',
-    label: 'STL',
-    kind: 'model',
-    extensions: ['stl'],
-    planned: 'STL은 아직 읽지 못합니다. GLB로 내보내면 지금도 열립니다.',
   },
   {
     id: 'blender',

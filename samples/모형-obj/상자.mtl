@@ -1,0 +1,9 @@
+# 홀로그램 뷰어 샘플
+newmtl 나무
+Kd 1 1 1
+Ns 40
+map_Kd textures/나뭇결.png
+
+newmtl 금속
+Kd 0.55 0.6 0.68
+Ns 600

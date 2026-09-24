@@ -15,7 +15,9 @@ import {
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { holoColors, type CameraDrive, type StoredCamera } from '@holo/core'
-import { disposeScene, parseGltf } from './gltfParse'
+import type { ModelFormat } from '@holo/data'
+import { disposeScene } from './gltfParse'
+import { parseModel } from './modelParse'
 
 import {
   maxPixelRatio,
@@ -42,6 +44,8 @@ import { createOrbitDrive } from './orbitDrive'
 export type ModelDisplayMode = 'original' | 'hologram'
 
 export type ModelViewProps = {
+  /** 바이트를 무엇으로 풀지. GLB·glTF·OBJ·STL. */
+  format: ModelFormat
   /** 원본 바이트. 이것이 바뀔 때만 다시 파싱한다. */
   bytes: ArrayBuffer
   /**
@@ -83,6 +87,7 @@ type Parsed =
  * 열기 전에 이미 그 사실을 세어 두었으므로 사람은 까닭을 먼저 읽는다.
  */
 function useParsedModel(
+  format: ModelFormat,
   bytes: ArrayBuffer,
   resources: ReadonlyMap<string, ArrayBuffer> | undefined,
 ): Parsed {
@@ -92,7 +97,7 @@ function useParsedModel(
     let alive = true
     setParsed({ kind: 'loading' })
 
-    const parsed = parseGltf(bytes, resources)
+    const parsed = parseModel(format, bytes, resources)
     void parsed.scene.then(
       (root) => {
         if (alive) setParsed({ kind: 'ready', root })
@@ -108,7 +113,7 @@ function useParsedModel(
       alive = false
       parsed.release()
     }
-  }, [bytes, resources])
+  }, [format, bytes, resources])
 
   /*
    * 장면을 버릴 때 GPU 자원을 직접 돌려준다. three는 참조가 끊겨도 스스로 반납하지
@@ -262,8 +267,8 @@ function Stage({
 }
 
 export function ModelView(props: ModelViewProps) {
-  const { bytes, resources, mode, effect, camera, onCameraRest, drive, onStatus } = props
-  const parsed = useParsedModel(bytes, resources)
+  const { format, bytes, resources, mode, effect, camera, onCameraRest, drive, onStatus } = props
+  const parsed = useParsedModel(format, bytes, resources)
   const controls = useRef<OrbitControlsHandle>(null)
   const start = camera?.position ?? DEFAULT_CAMERA
 

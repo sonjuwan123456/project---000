@@ -189,6 +189,119 @@ out(
 )
 out('모형/textures/나무 바닥.png', png(8, 8, [200, 140, 60]))
 
+/*
+ * 갈라진 OBJ. glTF와 달리 **두 단계로** 갈라진다 — OBJ가 `.mtl`을 가리키고, 그 `.mtl`이
+ * 다시 그림을 가리킨다. 그래서 `.mtl`을 찾아 읽어야 그다음에 찾을 그림 이름이 나온다.
+ *
+ * 덩어리 둘(상자·받침)이 재질 둘(나무·금속)을 쓴다. 상자의 면은 사각형이라 삼각형 둘로
+ * 쪼개져 세어지고, 받침의 윗면은 육각형이라 넷으로 쪼개진다(k각형은 k-2개).
+ */
+const 상자 = [
+  '# 홀로그램 뷰어 샘플',
+  'mtllib 상자.mtl',
+  'o 상자',
+  ...[
+    [-1, 0, -1],
+    [1, 0, -1],
+    [1, 2, -1],
+    [-1, 2, -1],
+    [-1, 0, 1],
+    [1, 0, 1],
+    [1, 2, 1],
+    [-1, 2, 1],
+  ].map(([x, y, z]) => `v ${x} ${y} ${z}`),
+  ...[
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+  ].map(([u, v]) => `vt ${u} ${v}`),
+  'usemtl 나무',
+  // 꼭짓점/텍스처 좌표. 번호는 1부터 센다.
+  'f 1/1 4/4 3/3 2/2',
+  'f 5/1 6/2 7/3 8/4',
+  'f 1/1 2/2 6/3 5/4',
+  'f 4/1 8/2 7/3 3/4',
+  'f 1/1 5/2 8/3 4/4',
+  'f 2/1 3/2 7/3 6/4',
+  'o 받침',
+  ...Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 3) * i
+    return `v ${(Math.cos(a) * 2).toFixed(4)} -0.1 ${(Math.sin(a) * 2).toFixed(4)}`
+  }),
+  'usemtl 금속',
+  // 위에서 볼 때 반시계로 돌아야 윗면이 위를 본다.
+  'f 14 13 12 11 10 9',
+]
+out('모형-obj/상자.obj', 상자.join('\n') + '\n')
+out(
+  '모형-obj/상자.mtl',
+  [
+    '# 홀로그램 뷰어 샘플',
+    'newmtl 나무',
+    'Kd 1 1 1',
+    'Ns 40',
+    'map_Kd textures/나뭇결.png',
+    '',
+    'newmtl 금속',
+    'Kd 0.55 0.6 0.68',
+    'Ns 600',
+  ].join('\n') + '\n',
+)
+out('모형-obj/textures/나뭇결.png', png(8, 8, [176, 112, 58]))
+
+/*
+ * 이진 STL. 육각기둥 하나, 삼각형 24개(옆면 12, 윗면·아랫면 6씩).
+ *
+ * **머리 80바이트를 일부러 "solid"로 시작한다.** 글자판 STL이 "solid"로 시작하므로 앞머리만
+ * 보면 글자판으로 잘못 읽는다. 실제로 그렇게 내보내는 CAD가 흔해서, 크기가 이진판 공식에
+ * 맞는지를 먼저 보는 갈림길을 밟으라고 둔다. Z축이 위다 — STL의 관례대로.
+ */
+{
+  const ring = Array.from({ length: 6 }, (_, i) => {
+    const a = (Math.PI / 3) * i
+    return [Math.cos(a) * 3, Math.sin(a) * 3]
+  })
+  const faces = []
+  for (let i = 0; i < 6; i += 1) {
+    const [ax, ay] = ring[i]
+    const [bx, by] = ring[(i + 1) % 6]
+    faces.push([
+      [ax, ay, 0],
+      [bx, by, 0],
+      [bx, by, 4],
+    ])
+    faces.push([
+      [ax, ay, 0],
+      [bx, by, 4],
+      [ax, ay, 4],
+    ])
+    faces.push([
+      [0, 0, 4],
+      [ax, ay, 4],
+      [bx, by, 4],
+    ])
+    faces.push([
+      [0, 0, 0],
+      [bx, by, 0],
+      [ax, ay, 0],
+    ])
+  }
+  const stl = Buffer.alloc(84 + faces.length * 50)
+  Buffer.from('solid 홀로그램 뷰어 샘플 부품 (이진판)').copy(stl, 0, 0, 80)
+  stl.writeUInt32LE(faces.length, 80)
+  faces.forEach((face, index) => {
+    let at = 84 + index * 50 + 12 // 법선은 0으로 둔다. 읽는 쪽이 면에서 다시 구한다.
+    for (const corner of face) {
+      for (const value of corner) {
+        stl.writeFloatLE(value, at)
+        at += 4
+      }
+    }
+  })
+  out('부품.stl', stl)
+}
+
 function png(width, height, rgb) {
   const chunk = (tag, data) => {
     const body = Buffer.concat([Buffer.from(tag), data])

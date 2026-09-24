@@ -46,6 +46,8 @@ describe('샘플 · 종류 가리기', () => {
     ['읽어보기.md', 'text'],
     ['예시.ts', 'text'],
     ['모형/scene.gltf', 'model'],
+    ['모형-obj/상자.obj', 'model'],
+    ['부품.stl', 'model'],
   ])('%s 는 %s 로 간다', async (name, kind) => {
     expect(await kindOfFile(fileOf(name))).toBe(kind)
   })
@@ -121,5 +123,38 @@ describe('샘플 · 3D 모델', () => {
     const model = await readModelFile(fileOf('모형/scene.gltf'), { bundle })
     expect(model.resources.size).toBe(2)
     expect(model.summary.triangles).toBe(1)
+  })
+})
+
+describe('샘플 · OBJ와 STL', () => {
+  /*
+   * OBJ는 두 번 갈라져 있다. 파일 하나만 열면 .mtl을 못 찾고, 폴더째 주면 .mtl을 읽은 뒤
+   * 그 안에 적힌 그림까지 찾는다.
+   */
+  it('상자.obj는 덩어리 둘, 재질 둘, 삼각형 16개다', async () => {
+    const model = await readModelFile(fileOf('모형-obj/상자.obj'))
+    expect(model.summary.meshes).toBe(2)
+    expect(model.summary.materials).toBe(2)
+    // 상자의 사각형 여섯이 12개, 받침의 육각형 하나가 4개.
+    expect(model.summary.triangles).toBe(16)
+    expect(model.resources.size).toBe(0)
+  })
+
+  it('폴더째 묶어 주면 .mtl과 그 안의 그림까지 찾아 온다', async () => {
+    const bundle = bundleOf('모형-obj', [
+      ['상자.obj', fileOf('모형-obj/상자.obj')],
+      ['상자.mtl', fileOf('모형-obj/상자.mtl')],
+      ['textures/나뭇결.png', fileOf('모형-obj/textures/나뭇결.png')],
+    ])
+    expect(pickPrimary(bundle)?.path).toBe('상자.obj')
+    const model = await readModelFile(fileOf('모형-obj/상자.obj'), { bundle })
+    expect(model.resources.size).toBe(2)
+    expect(model.summary.textures).toBe(1)
+    expect(model.notices.some((one) => one.level === 'warning')).toBe(false)
+  })
+
+  it('부품.stl은 머리가 "solid"로 시작해도 이진판으로 읽혀 삼각형 24개가 나온다', async () => {
+    const model = await readModelFile(fileOf('부품.stl'))
+    expect(model.summary.triangles).toBe(24)
   })
 })

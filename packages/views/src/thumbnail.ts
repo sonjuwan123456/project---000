@@ -27,7 +27,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { useEffect, useRef, useState } from 'react'
 import type { Asset, AssetKind, LoadedModel } from '@holo/data'
 
-import { disposeScene, parseGltf } from './gltfParse'
+import { disposeScene } from './gltfParse'
+import { parseModel } from './modelParse'
 
 /** 한 변의 픽셀 수. 목록에 얹힐 크기이고, 화면 배율은 CSS가 맡는다. */
 export const THUMBNAIL_SIZE = 96
@@ -76,7 +77,7 @@ export function frameBox(camera: PerspectiveCamera, box: Box3): void {
 async function renderModel(model: LoadedModel): Promise<string | null> {
   if (typeof document === 'undefined') return null
 
-  const parsed = parseGltf(model.bytes, model.resources)
+  const parsed = parseModel(model.format, model.bytes, model.resources)
   let root
   try {
     root = await parsed.scene

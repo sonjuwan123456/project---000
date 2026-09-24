@@ -251,3 +251,102 @@ describe('readModelFile · 묶음', () => {
     expect(model.summary.externalResources).toEqual([])
   })
 })
+
+/** 글자 하나를 묶음 안 파일로 만든다. */
+function entryOf(path: string, body: string) {
+  const bytes = new TextEncoder().encode(body).buffer as ArrayBuffer
+  return [
+    path,
+    {
+      name: path.slice(path.lastIndexOf('/') + 1),
+      size: bytes.byteLength,
+      arrayBuffer: async () => bytes,
+      text: async () => body,
+    },
+  ] as const
+}
+
+const box = ['mtllib 상자.mtl', 'o 상자', 'v 0 0 0', 'v 1 0 0', 'v 1 1 0', 'v 0 1 0']
+  .concat(['usemtl 나무', 'f 1 2 3 4'])
+  .join('\n')
+const boxMtl = 'newmtl 나무\nKd 1 1 1\nmap_Kd textures/나뭇결.png\n'
+
+describe('readModelFile · OBJ', () => {
+  it('OBJ를 읽어 면과 재질을 센다', async () => {
+    const model = await readModelFile(fileOf('상자.obj', box))
+    expect(model.format).toBe('obj')
+    expect(model.summary.triangles).toBe(2)
+    expect(model.summary.materials).toBe(1)
+  })
+
+  it('파일 하나만 열면 .mtl을 못 찾았다고 OBJ의 말로 알린다', async () => {
+    const model = await readModelFile(fileOf('상자.obj', box))
+    const warning = model.notices.find((one) => one.level === 'warning')
+    expect(warning?.message).toContain('이 OBJ가')
+    expect(warning?.message).toContain('상자.mtl')
+    expect(warning?.message).not.toContain('glTF가')
+  })
+
+  /*
+   * 두 번 찾아야 하는 까닭. 그림 이름은 OBJ가 아니라 .mtl에 적혀 있어서, .mtl을 찾아
+   * 읽기 전에는 무엇을 더 찾아야 하는지조차 모른다.
+   */
+  it('폴더째 주면 .mtl을 읽고 그 안에 적힌 그림까지 찾아 온다', async () => {
+    const bundle = bundleOf('모형', [
+      entryOf('상자.mtl', boxMtl),
+      entryOf('textures/나뭇결.png', 'png'),
+    ])
+    const model = await readModelFile(fileOf('상자.obj', box), { bundle })
+    expect([...model.resources.keys()]).toEqual(['상자.mtl', 'textures/나뭇결.png'])
+    expect(model.summary.textures).toBe(1)
+    expect(model.notices.some((one) => one.level === 'warning')).toBe(false)
+  })
+
+  it('.mtl은 찾았는데 그림이 없으면 그림 이름을 들어 알린다', async () => {
+    const bundle = bundleOf('모형', [entryOf('상자.mtl', boxMtl)])
+    const model = await readModelFile(fileOf('상자.obj', box), { bundle })
+    expect(model.resources.has('상자.mtl')).toBe(true)
+    const warning = model.notices.find((one) => one.level === 'warning')
+    expect(warning?.message).toContain('textures/나뭇결.png')
+    expect(warning?.message).toContain('1개를 찾지 못했습니다')
+  })
+
+  it('면이 없는 OBJ는 열지 않고 까닭을 말한다', async () => {
+    await expect(readModelFile(fileOf('점.obj', 'v 0 0 0\nv 1 0 0'))).rejects.toThrow(/면이 없/)
+  })
+})
+
+describe('readModelFile · STL', () => {
+  function binaryStl(faces: number): ArrayBuffer {
+    const buffer = new ArrayBuffer(84 + faces * 50)
+    new DataView(buffer).setUint32(80, faces, true)
+    return buffer
+  }
+
+  it('STL을 읽어 삼각형을 센다', async () => {
+    const model = await readModelFile(fileOf('부품.stl', binaryStl(24)))
+    expect(model.format).toBe('stl')
+    expect(model.summary.triangles).toBe(24)
+  })
+
+  it('재질이 없다는 것을 빠진 것이 아니라 한 가지 색으로 보인다고 말한다', async () => {
+    const model = await readModelFile(fileOf('부품.stl', binaryStl(24)))
+    const info = model.notices.find((one) => one.level === 'info')
+    expect(info?.message).toContain('삼각형 24개')
+    expect(info?.message).toContain('한 가지 색')
+    expect(info?.message).not.toContain('재질 0개')
+  })
+
+  it('삼각형이 하나도 없는 STL은 열지 않는다', async () => {
+    await expect(readModelFile(fileOf('빈.stl', binaryStl(0)))).rejects.toThrow(/삼각형이 없/)
+  })
+
+  it('잘린 STL은 파일 이름을 달아서 알린다', async () => {
+    const error = await readModelFile(fileOf('잘린.stl', binaryStl(10).slice(0, 200))).catch(
+      (caught: unknown) => caught,
+    )
+    expect(error).toBeInstanceOf(UnsupportedFileError)
+    expect((error as UnsupportedFileError).fileName).toBe('잘린.stl')
+    expect((error as UnsupportedFileError).message).toMatch(/잘렸습니다/)
+  })
+})
